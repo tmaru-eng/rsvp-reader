@@ -30,7 +30,8 @@ describe("reader settings", () => {
     expect(DEFAULT_SETTINGS).toMatchObject({
       speed: 450,
       groupSize: 1,
-      minChars: 0,
+      minChars: 3,
+      breakReminder: true,
       fontSize: 56,
       focusGuides: false,
       proportionality: 100,
@@ -43,10 +44,10 @@ describe("reader settings", () => {
 
   it("persists settings and clamps invalid stored values to the supported range", () => {
     const storage = memoryStorage();
-    saveSettings({ ...DEFAULT_SETTINGS, speed: 1200, groupSize: 2, minChars: 3 }, storage);
-    expect(loadSettings(storage)).toMatchObject({ speed: 1200, groupSize: 2, minChars: 3 });
+    saveSettings({ ...DEFAULT_SETTINGS, speed: 1200, groupSize: 2, minChars: 2, breakReminder: false }, storage);
+    expect(loadSettings(storage)).toMatchObject({ speed: 1200, groupSize: 2, minChars: 2, breakReminder: false });
     storage.setItem("rsvp-reader.settings.v1", JSON.stringify({ speed: 9999, groupSize: 8, minChars: 9, fontSize: 2 }));
-    expect(loadSettings(storage)).toMatchObject({ speed: 3000, groupSize: 1, minChars: 0, fontSize: 32 });
+    expect(loadSettings(storage)).toMatchObject({ speed: 3000, groupSize: 1, minChars: 3, fontSize: 32 });
   });
 
   it("defaults to 40px below 600px wide unless a saved font size exists", () => {

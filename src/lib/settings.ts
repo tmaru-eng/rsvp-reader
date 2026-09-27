@@ -1,6 +1,8 @@
 import type { ChunkOptions } from "./chunking";
 
 export interface ReaderSettings extends Omit<ChunkOptions, "maxChars"> {
+  /** 再生した時間が合計 50 分に達したら止めて休憩を案内する（厚生労働省の情報機器作業ガイドライン）。 */
+  breakReminder: boolean;
   speed: number;
   fontSize: number;
   punctuationPause: boolean;
@@ -19,10 +21,11 @@ export const SETTINGS_STORAGE_KEY = "rsvp-reader.settings.v1";
 export const DEFAULT_SETTINGS: ReaderSettings = {
   speed: 450,
   groupSize: 1,
-  minChars: 0,
+  minChars: 3,
   fontSize: 56,
   punctuationPause: true,
   focusGuides: false,
+  breakReminder: true,
   proportionality: 100,
   commaPause: 1.3,
   sentencePause: 1.8,
@@ -59,6 +62,7 @@ export function parseSettings(raw: string | null, defaultFontSize = DEFAULT_SETT
       fontSize: boundedNumber(values.fontSize, defaultFontSize, 32, 96),
       punctuationPause: typeof values.punctuationPause === "boolean" ? values.punctuationPause : DEFAULT_SETTINGS.punctuationPause,
       focusGuides: typeof values.focusGuides === "boolean" ? values.focusGuides : DEFAULT_SETTINGS.focusGuides,
+      breakReminder: typeof values.breakReminder === "boolean" ? values.breakReminder : DEFAULT_SETTINGS.breakReminder,
       proportionality: boundedNumber(values.proportionality, DEFAULT_SETTINGS.proportionality, 0, 100),
       commaPause: boundedDecimal(values.commaPause, DEFAULT_SETTINGS.commaPause, 1, 3),
       sentencePause: boundedDecimal(values.sentencePause, DEFAULT_SETTINGS.sentencePause, 1, 3),

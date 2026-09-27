@@ -8,6 +8,10 @@ import { parseTextDocument } from "./lib/text";
 import { calculateChunkDuration, calculateRemainingTime } from "./lib/timing";
 import type { BookRecord, Chunk, ParsedBook } from "./lib/types";
 
+// 厚生労働省「情報機器作業における労働衛生管理のためのガイドライン」（連続作業は1時間以内）に合わせた休憩の案内。
+const BREAK_AFTER_MS = 50 * 60 * 1000;
+const BREAK_RESET_AFTER_PAUSE_MS = 5 * 60 * 1000;
+
 const root = document.querySelector<HTMLElement>("#app");
 if (!root) throw new Error("#app が見つかりません。");
 
@@ -18,6 +22,10 @@ class ReaderApp {
   private chunks: Chunk[] = [];
   private currentIndex = 0;
   private isPlaying = false;
+  private playedMs = 0;
+  private playStartedAt: number | undefined;
+  private lastPausedAt: number | undefined;
+  private breakTimerId: number | undefined;
   private timerId: number | undefined;
   private nextDeadline: number | undefined;
   private wakeLock: WakeLockSentinel | undefined;
@@ -102,6 +110,10 @@ class ReaderApp {
               <div class="current-chunk" id="current-chunk" aria-live="off">ファイルを選ぶか、文章を貼り付けてください。</div>
             </div>
             <div class="reader-warning is-hidden" id="reader-warning" role="status"></div>
+            <div class="break-notice is-hidden" id="break-notice" role="alert">
+              <span>50分読みました。1〜2分、遠くを見るか目を閉じて休みましょう。</span>
+              <button class="secondary-button" id="break-resume" type="button">続きを読む</button>
+            </div>
             <footer class="reader-footer">
               <progress class="progress-track" id="progress" max="1" value="0" aria-label="読書の進捗"></progress>
               <div class="reader-status">
@@ -181,6 +193,10 @@ class ReaderApp {
                   <span>段落末の倍率</span>
                   <input id="paragraph-pause-slider" type="range" min="1" max="4" step="0.1" value="1.8" />
                   <output class="range-value timing-detail-value" id="paragraph-pause-value" for="paragraph-pause-slider">1.8×</output>
+                </label>
+                <label class="control-group break-reminder-option" for="break-reminder">
+                  <input id="break-reminder" type="checkbox" checked />
+                  50分ごとに休憩を案内する
                 </label>
                 <label class="timing-detail" for="min-duration-slider">
                   <span>1区切りの最短時間</span>
@@ -305,6 +321,16 @@ class ReaderApp {
     this.element<HTMLInputElement>("#punctuation-pause").addEventListener("change", (event) => {
       this.settings.punctuationPause = (event.currentTarget as HTMLInputElement).checked;
       this.settingsChanged(true);
+    });
+    this.element<HTMLInputElement>("#break-reminder").addEventListener("change", (event) => {
+      this.settings.breakReminder = (event.currentTarget as HTMLInputElement).checked;
+      this.settingsChanged(false);
+      this.scheduleBreakReminder();
+    });
+    this.element<HTMLButtonElement>("#break-resume").addEventListener("click", (event) => {
+      event.stopPropagation();
+      this.element<HTMLDivElement>("#break-notice").classList.add("is-hidden");
+      this.startPlayback();
     });
     this.element<HTMLInputElement>("#focus-guides").addEventListener("change", (event) => {
       this.settings.focusGuides = (event.currentTarget as HTMLInputElement).checked;
@@ -583,6 +609,7 @@ class ReaderApp {
     this.element<HTMLOutputElement>("#font-size-value").value = `${this.settings.fontSize}px`;
     this.element<HTMLInputElement>("#punctuation-pause").checked = this.settings.punctuationPause;
     this.element<HTMLInputElement>("#focus-guides").checked = this.settings.focusGuides;
+    this.element<HTMLInputElement>("#break-reminder").checked = this.settings.breakReminder;
     this.element<HTMLInputElement>("#proportionality-slider").value = String(this.settings.proportionality);
     this.element<HTMLOutputElement>("#proportionality-value").value = `${this.settings.proportionality}%`;
     this.element<HTMLInputElement>("#comma-pause-slider").value = String(this.settings.commaPause);
@@ -715,18 +742,44 @@ class ReaderApp {
   private startPlayback(): void {
     if (!this.currentBook || this.chunks.length === 0 || this.isPlaying) return;
     this.isPlaying = true;
+    const now = performance.now();
+    // 5分以上止めていたら休んだとみなし、休憩までの時間を数え直す。
+    if (this.lastPausedAt !== undefined && now - this.lastPausedAt >= BREAK_RESET_AFTER_PAUSE_MS) this.playedMs = 0;
+    this.playStartedAt = now;
+    this.element<HTMLDivElement>("#break-notice").classList.add("is-hidden");
+    this.scheduleBreakReminder();
     this.resetCurrentDeadline();
     void this.requestWakeLock();
     this.updateReadingView();
   }
 
   private pausePlayback(): void {
+    if (this.isPlaying && this.playStartedAt !== undefined) this.playedMs += performance.now() - this.playStartedAt;
+    this.playStartedAt = undefined;
+    this.lastPausedAt = performance.now();
+    if (this.breakTimerId !== undefined) window.clearTimeout(this.breakTimerId);
+    this.breakTimerId = undefined;
     this.isPlaying = false;
     if (this.timerId !== undefined) window.clearTimeout(this.timerId);
     this.timerId = undefined;
     this.nextDeadline = undefined;
     void this.releaseWakeLock();
     if (this.appRoot.querySelector("#play-toggle")) this.updateReadingView();
+  }
+
+  private scheduleBreakReminder(): void {
+    if (this.breakTimerId !== undefined) window.clearTimeout(this.breakTimerId);
+    this.breakTimerId = undefined;
+    if (!this.isPlaying || !this.settings.breakReminder || this.playStartedAt === undefined) return;
+    const playedSoFar = this.playedMs + (performance.now() - this.playStartedAt);
+    this.breakTimerId = window.setTimeout(() => this.showBreakNotice(), Math.max(0, BREAK_AFTER_MS - playedSoFar));
+  }
+
+  private showBreakNotice(): void {
+    this.breakTimerId = undefined;
+    this.pausePlayback();
+    this.playedMs = 0;
+    this.element<HTMLDivElement>("#break-notice").classList.remove("is-hidden");
   }
 
   private resetCurrentDeadline(): void {

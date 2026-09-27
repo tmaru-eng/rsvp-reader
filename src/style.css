@@ -603,6 +603,33 @@ label:focus-within {
   font-size: 12px;
 }
 
+.break-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border-top: 1px solid #e6d9bd;
+  background: #fff8e7;
+  color: #735927;
+  font-size: 13px;
+}
+
+.break-notice button {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.break-notice.is-hidden {
+  display: none;
+}
+
+.break-reminder-option {
+  min-height: 44px;
+  color: #5e5b54;
+  font-size: 12px;
+}
+
 .loading-message {
   margin: 12px 14px 0;
   color: var(--muted);

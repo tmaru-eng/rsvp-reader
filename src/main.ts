@@ -1,7 +1,7 @@
 import "./style.css";
 import { buildChunks, type ChunkOptions } from "./lib/chunking";
 import { parseEpub } from "./lib/epub";
-import { loadSettings, saveSettings, type ReaderSettings } from "./lib/settings";
+import { DEFAULT_SETTINGS, loadSettings, saveSettings, type ReaderSettings } from "./lib/settings";
 import { createBookRepository, sha256Text, type BookRepository } from "./lib/storage";
 import { parseTextDocument } from "./lib/text";
 import { calculateChunkDuration, calculateRemainingTime } from "./lib/timing";
@@ -145,7 +145,40 @@ class ReaderApp {
                   <input id="focus-guides" type="checkbox" checked />
                   注視点ガイド
                 </label>
+
+                <button class="secondary-button detail-toggle" id="timing-details-toggle" type="button" aria-expanded="false" aria-controls="timing-details">詳細</button>
               </div>
+              <section class="timing-details is-hidden" id="timing-details" aria-label="再生リズムの詳細設定">
+                <div class="timing-details-header">
+                  <strong>再生リズム</strong>
+                  <button class="secondary-button" id="timing-details-reset" type="button">既定に戻す</button>
+                </div>
+                <label class="timing-detail" for="proportionality-slider">
+                  <span>字数比例</span>
+                  <input id="proportionality-slider" type="range" min="0" max="100" step="10" value="100" />
+                  <output class="range-value timing-detail-value" id="proportionality-value" for="proportionality-slider">100%</output>
+                </label>
+                <label class="timing-detail" for="comma-pause-slider">
+                  <span>「、」の倍率</span>
+                  <input id="comma-pause-slider" type="range" min="1" max="3" step="0.1" value="1.3" />
+                  <output class="range-value timing-detail-value" id="comma-pause-value" for="comma-pause-slider">1.3×</output>
+                </label>
+                <label class="timing-detail" for="sentence-pause-slider">
+                  <span>文末（。！？・」）の倍率</span>
+                  <input id="sentence-pause-slider" type="range" min="1" max="3" step="0.1" value="1.6" />
+                  <output class="range-value timing-detail-value" id="sentence-pause-value" for="sentence-pause-slider">1.6×</output>
+                </label>
+                <label class="timing-detail" for="paragraph-pause-slider">
+                  <span>段落末の倍率</span>
+                  <input id="paragraph-pause-slider" type="range" min="1" max="4" step="0.1" value="1.8" />
+                  <output class="range-value timing-detail-value" id="paragraph-pause-value" for="paragraph-pause-slider">1.8×</output>
+                </label>
+                <label class="timing-detail" for="min-duration-slider">
+                  <span>1区切りの最短時間</span>
+                  <input id="min-duration-slider" type="range" min="50" max="400" step="10" value="150" />
+                  <output class="range-value timing-detail-value" id="min-duration-value" for="min-duration-slider">150ms</output>
+                </label>
+              </section>
             </footer>
           </section>
 
@@ -237,6 +270,40 @@ class ReaderApp {
     this.element<HTMLInputElement>("#focus-guides").addEventListener("change", (event) => {
       this.settings.focusGuides = (event.currentTarget as HTMLInputElement).checked;
       this.settingsChanged(false);
+    });
+    this.element<HTMLButtonElement>("#timing-details-toggle").addEventListener("click", (event) => {
+      const panel = this.element<HTMLElement>("#timing-details");
+      const isOpen = panel.classList.toggle("is-hidden") === false;
+      (event.currentTarget as HTMLButtonElement).setAttribute("aria-expanded", String(isOpen));
+      this.scheduleLayoutUpdate();
+    });
+    this.element<HTMLButtonElement>("#timing-details-reset").addEventListener("click", () => {
+      this.settings.proportionality = DEFAULT_SETTINGS.proportionality;
+      this.settings.commaPause = DEFAULT_SETTINGS.commaPause;
+      this.settings.sentencePause = DEFAULT_SETTINGS.sentencePause;
+      this.settings.paragraphPause = DEFAULT_SETTINGS.paragraphPause;
+      this.settings.minDuration = DEFAULT_SETTINGS.minDuration;
+      this.settingsChanged(true);
+    });
+    this.element<HTMLInputElement>("#proportionality-slider").addEventListener("input", (event) => {
+      this.settings.proportionality = Number((event.currentTarget as HTMLInputElement).value);
+      this.settingsChanged(true);
+    });
+    this.element<HTMLInputElement>("#comma-pause-slider").addEventListener("input", (event) => {
+      this.settings.commaPause = Number((event.currentTarget as HTMLInputElement).value);
+      this.settingsChanged(true);
+    });
+    this.element<HTMLInputElement>("#sentence-pause-slider").addEventListener("input", (event) => {
+      this.settings.sentencePause = Number((event.currentTarget as HTMLInputElement).value);
+      this.settingsChanged(true);
+    });
+    this.element<HTMLInputElement>("#paragraph-pause-slider").addEventListener("input", (event) => {
+      this.settings.paragraphPause = Number((event.currentTarget as HTMLInputElement).value);
+      this.settingsChanged(true);
+    });
+    this.element<HTMLInputElement>("#min-duration-slider").addEventListener("input", (event) => {
+      this.settings.minDuration = Number((event.currentTarget as HTMLInputElement).value);
+      this.settingsChanged(true);
     });
   }
 
@@ -463,6 +530,16 @@ class ReaderApp {
     this.element<HTMLOutputElement>("#font-size-value").value = `${this.settings.fontSize}px`;
     this.element<HTMLInputElement>("#punctuation-pause").checked = this.settings.punctuationPause;
     this.element<HTMLInputElement>("#focus-guides").checked = this.settings.focusGuides;
+    this.element<HTMLInputElement>("#proportionality-slider").value = String(this.settings.proportionality);
+    this.element<HTMLOutputElement>("#proportionality-value").value = `${this.settings.proportionality}%`;
+    this.element<HTMLInputElement>("#comma-pause-slider").value = String(this.settings.commaPause);
+    this.element<HTMLOutputElement>("#comma-pause-value").value = `${this.settings.commaPause.toFixed(1)}×`;
+    this.element<HTMLInputElement>("#sentence-pause-slider").value = String(this.settings.sentencePause);
+    this.element<HTMLOutputElement>("#sentence-pause-value").value = `${this.settings.sentencePause.toFixed(1)}×`;
+    this.element<HTMLInputElement>("#paragraph-pause-slider").value = String(this.settings.paragraphPause);
+    this.element<HTMLOutputElement>("#paragraph-pause-value").value = `${this.settings.paragraphPause.toFixed(1)}×`;
+    this.element<HTMLInputElement>("#min-duration-slider").value = String(this.settings.minDuration);
+    this.element<HTMLOutputElement>("#min-duration-value").value = `${this.settings.minDuration}ms`;
   }
 
   private updateReadingView(): void {
@@ -482,6 +559,11 @@ class ReaderApp {
     const remaining = calculateRemainingTime(this.chunks, this.currentIndex, this.settings.speed, {
       punctuationPause: this.settings.punctuationPause,
       maxChars: this.activeMaxChars,
+      proportionality: this.settings.proportionality,
+      commaPause: this.settings.commaPause,
+      sentencePause: this.settings.sentencePause,
+      paragraphPause: this.settings.paragraphPause,
+      minDuration: this.settings.minDuration,
     });
     const seconds = Math.ceil(remaining / 1000);
     this.element<HTMLElement>("#remaining-time").textContent = `残り 約${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
@@ -611,6 +693,11 @@ class ReaderApp {
       punctuationPause: this.settings.punctuationPause,
       paragraphEnd,
       maxChars: this.activeMaxChars,
+      proportionality: this.settings.proportionality,
+      commaPause: this.settings.commaPause,
+      sentencePause: this.settings.sentencePause,
+      paragraphPause: this.settings.paragraphPause,
+      minDuration: this.settings.minDuration,
     });
   }
 

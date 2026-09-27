@@ -1,6 +1,12 @@
 import type { TimedChunk } from "./types";
 
-const MIN_DURATION_MS = 150;
+const DEFAULT_TIMING = {
+  proportionality: 100,
+  commaPause: 1.3,
+  sentencePause: 1.6,
+  paragraphPause: 1.8,
+  minDuration: 150,
+} as const;
 const commaPunctuation = /、$/u;
 const sentencePunctuation = /[。！？」]$/u;
 
@@ -8,6 +14,11 @@ export interface TimingOptions {
   punctuationPause?: boolean;
   paragraphEnd?: boolean;
   maxChars?: number;
+  proportionality?: number;
+  commaPause?: number;
+  sentencePause?: number;
+  paragraphPause?: number;
+  minDuration?: number;
 }
 
 function displayWidth(text: string): number {
@@ -16,12 +27,15 @@ function displayWidth(text: string): number {
 
 export function calculateChunkDuration(chunk: TimedChunk, speed: number, options: TimingOptions = {}): number {
   const baselineChars = Math.min(options.maxChars ?? 5, 5);
-  const effectiveChars = 0.5 * displayWidth(chunk.text) + 0.5 * baselineChars;
-  const baseDuration = Math.max(MIN_DURATION_MS, (effectiveChars / speed) * 60_000);
+  const proportionality = (options.proportionality ?? DEFAULT_TIMING.proportionality) / 100;
+  const effectiveChars = proportionality * displayWidth(chunk.text) + (1 - proportionality) * baselineChars;
+  const baseDuration = Math.max(options.minDuration ?? DEFAULT_TIMING.minDuration, (effectiveChars / speed) * 60_000);
   if (options.punctuationPause === false) return baseDuration;
-  if (options.paragraphEnd) return baseDuration * 1.8;
-  if (commaPunctuation.test(chunk.text)) return baseDuration * 1.3;
-  if (chunk.endsWithPunct || sentencePunctuation.test(chunk.text)) return baseDuration * 1.6;
+  if (options.paragraphEnd) return baseDuration * (options.paragraphPause ?? DEFAULT_TIMING.paragraphPause);
+  if (commaPunctuation.test(chunk.text)) return baseDuration * (options.commaPause ?? DEFAULT_TIMING.commaPause);
+  if (chunk.endsWithPunct || sentencePunctuation.test(chunk.text)) {
+    return baseDuration * (options.sentencePause ?? DEFAULT_TIMING.sentencePause);
+  }
   return baseDuration;
 }
 

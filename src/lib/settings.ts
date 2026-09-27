@@ -5,6 +5,11 @@ export interface ReaderSettings extends Omit<ChunkOptions, "maxChars"> {
   fontSize: number;
   punctuationPause: boolean;
   focusGuides: boolean;
+  proportionality: number;
+  commaPause: number;
+  sentencePause: number;
+  paragraphPause: number;
+  minDuration: number;
 }
 
 export const SETTINGS_STORAGE_KEY = "rsvp-reader.settings.v1";
@@ -16,6 +21,11 @@ export const DEFAULT_SETTINGS: ReaderSettings = {
   fontSize: 56,
   punctuationPause: true,
   focusGuides: true,
+  proportionality: 100,
+  commaPause: 1.3,
+  sentencePause: 1.6,
+  paragraphPause: 1.8,
+  minDuration: 150,
 };
 
 type StorageLike = Pick<Storage, "getItem" | "setItem">;
@@ -27,6 +37,11 @@ function acceptedValue<T extends number>(value: unknown, allowed: readonly T[], 
 function boundedNumber(value: unknown, fallback: number, minimum: number, maximum: number): number {
   if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
   return Math.round(Math.min(maximum, Math.max(minimum, value)));
+}
+
+function boundedDecimal(value: unknown, fallback: number, minimum: number, maximum: number): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
+  return Math.min(maximum, Math.max(minimum, value));
 }
 
 export function parseSettings(raw: string | null, defaultFontSize = DEFAULT_SETTINGS.fontSize): ReaderSettings {
@@ -42,6 +57,11 @@ export function parseSettings(raw: string | null, defaultFontSize = DEFAULT_SETT
       fontSize: boundedNumber(values.fontSize, defaultFontSize, 32, 96),
       punctuationPause: typeof values.punctuationPause === "boolean" ? values.punctuationPause : DEFAULT_SETTINGS.punctuationPause,
       focusGuides: typeof values.focusGuides === "boolean" ? values.focusGuides : DEFAULT_SETTINGS.focusGuides,
+      proportionality: boundedNumber(values.proportionality, DEFAULT_SETTINGS.proportionality, 0, 100),
+      commaPause: boundedDecimal(values.commaPause, DEFAULT_SETTINGS.commaPause, 1, 3),
+      sentencePause: boundedDecimal(values.sentencePause, DEFAULT_SETTINGS.sentencePause, 1, 3),
+      paragraphPause: boundedDecimal(values.paragraphPause, DEFAULT_SETTINGS.paragraphPause, 1, 4),
+      minDuration: boundedNumber(values.minDuration, DEFAULT_SETTINGS.minDuration, 50, 400),
     };
   } catch {
     return { ...DEFAULT_SETTINGS };

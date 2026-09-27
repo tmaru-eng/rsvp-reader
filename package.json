@@ -1,0 +1,29 @@
+{
+  "name": "rsvp-reader",
+  "version": "1.0.0",
+  "private": true,
+  "description": "日本語の本を文節ごとに読む静的RSVPリーダー",
+  "scripts": {
+    "test": "vitest run",
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "devDependencies": {
+    "@types/node": "^26.6.3",
+    "@xmldom/xmldom": "^0.9.12",
+    "fake-indexeddb": "^6.2.5",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.1",
+    "vitest": "^4.1.11"
+  },
+  "dependencies": {
+    "budoux": "0.7.0",
+    "jszip": "^3.10.2",
+    "pdfjs-dist": "^6.3.289"
+  }
+}

@@ -1,4 +1,5 @@
-import { getDocument } from "pdfjs-dist";
+import "./polyfills";
+import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 import type { ParsedBook } from "./types";
 
 interface PdfTextItem {

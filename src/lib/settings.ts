@@ -14,18 +14,20 @@ export interface ReaderSettings extends Omit<ChunkOptions, "maxChars"> {
 
 export const SETTINGS_STORAGE_KEY = "rsvp-reader.settings.v1";
 
+// 既定値の根拠は docs/research-defaults.md。速度は大学生の黙読平均 653字/分（小林・川島 2018）より低め、
+// 注視ガイドは誘導なしのほうが理解度が高かった日本語 RSVP 実験（石森・桐谷 2024）に合わせて既定でオフ。
 export const DEFAULT_SETTINGS: ReaderSettings = {
-  speed: 600,
+  speed: 450,
   groupSize: 1,
   minChars: 0,
   fontSize: 56,
   punctuationPause: true,
-  focusGuides: true,
+  focusGuides: false,
   proportionality: 100,
   commaPause: 1.3,
-  sentencePause: 1.6,
-  paragraphPause: 1.8,
-  minDuration: 150,
+  sentencePause: 1.8,
+  paragraphPause: 2.2,
+  minDuration: 200,
 };
 
 type StorageLike = Pick<Storage, "getItem" | "setItem">;

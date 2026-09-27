@@ -19,8 +19,8 @@ describe("RSVP timing", () => {
     expect(calculateChunkDuration(chunk, 600, { maxChars: 5, proportionality: 100 })).toBe(300);
   });
 
-  it("applies the 150ms floor before punctuation multipliers", () => {
-    expect(calculateChunkDuration({ text: "語。", endsWithPunct: true }, 3000, { maxChars: 5 })).toBe(240);
+  it("applies the 200ms floor before punctuation multipliers", () => {
+    expect(calculateChunkDuration({ text: "語。", endsWithPunct: true }, 3000, { maxChars: 5 })).toBe(360);
   });
 
   it("uses configurable multipliers for commas, sentences, and paragraph ends", () => {
@@ -31,7 +31,7 @@ describe("RSVP timing", () => {
   });
 
   it("uses the paragraph-end multiplier and can disable all punctuation pauses", () => {
-    expect(calculateChunkDuration({ text: "読む。", endsWithPunct: true }, 600, { maxChars: 5, paragraphEnd: true })).toBe(540);
+    expect(calculateChunkDuration({ text: "読む。", endsWithPunct: true }, 600, { maxChars: 5, paragraphEnd: true })).toBe(660);
     expect(calculateChunkDuration({ text: "読む、", endsWithPunct: true }, 600, {
       maxChars: 5,
       punctuationPause: false,
@@ -56,7 +56,7 @@ describe("RSVP timing", () => {
       { text: "後続", endsWithPunct: false },
     ];
 
-    expect(calculateRemainingTime(chunks, 1, 600, { maxChars: 5 })).toBe(840);
+    expect(calculateRemainingTime(chunks, 1, 600, { maxChars: 5 })).toBe(980);
     expect(calculateRemainingTime(chunks, 3, 600, { maxChars: 5 })).toBe(0);
   });
 });

@@ -26,17 +26,18 @@ function memoryStorage(): Storage {
 }
 
 describe("reader settings", () => {
-  it("starts at 600 characters per minute with comfortable reading controls", () => {
+  it("starts at the research-based defaults (450 characters per minute, guides off)", () => {
     expect(DEFAULT_SETTINGS).toMatchObject({
-      speed: 600,
+      speed: 450,
       groupSize: 1,
       minChars: 0,
       fontSize: 56,
+      focusGuides: false,
       proportionality: 100,
       commaPause: 1.3,
-      sentencePause: 1.6,
-      paragraphPause: 1.8,
-      minDuration: 150,
+      sentencePause: 1.8,
+      paragraphPause: 2.2,
+      minDuration: 200,
     });
   });
 
@@ -79,9 +80,9 @@ describe("reader settings", () => {
       punctuationPause: false,
       proportionality: 100,
       commaPause: 1.3,
-      sentencePause: 1.6,
-      paragraphPause: 1.8,
-      minDuration: 150,
+      sentencePause: 1.8,
+      paragraphPause: 2.2,
+      minDuration: 200,
     });
   });
 

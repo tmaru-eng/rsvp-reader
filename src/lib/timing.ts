@@ -1,11 +1,12 @@
 import type { TimedChunk } from "./types";
 
+// 既定値の根拠は docs/research-defaults.md（2026-09-27 調査）。倍率と最短時間は日本語 RSVP の確立値がない仮置き。
 const DEFAULT_TIMING = {
   proportionality: 100,
   commaPause: 1.3,
-  sentencePause: 1.6,
-  paragraphPause: 1.8,
-  minDuration: 150,
+  sentencePause: 1.8,
+  paragraphPause: 2.2,
+  minDuration: 200,
 } as const;
 const commaPunctuation = /、$/u;
 const sentencePunctuation = /[。！？」]$/u;

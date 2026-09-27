@@ -122,4 +122,37 @@ describe("buildChunks", () => {
     expect(chunks.map(({ text }) => text).join("")).toBe("あいうえ");
     expect(chunks.every(({ text }) => Array.from(text).length <= 2)).toBe(true);
   });
+
+  it("keeps a ruby parent together even when the parent alone exceeds maxChars", () => {
+    const chunks = buildChunks(
+      "A漢字B",
+      { groupSize: 1, minChars: 0, maxChars: 1 },
+      () => ["A", "漢", "字", "B"],
+      [{ start: 1, end: 3, text: "かんじ" }],
+    );
+
+    expect(chunks.map(({ text }) => text)).toEqual(["A", "漢字", "B"]);
+    expect(chunks.map(({ text }) => Array.from(text).length)).toEqual([1, 2, 1]);
+  });
+
+  it("does not detach particles from a ruby base", () => {
+    const text = "ある金色の蕊からは、好い匂が、";
+    const rubies = [
+      { start: 2, end: 4, text: "きんいろ" },
+      { start: 5, end: 6, text: "ずい" },
+      { start: 10, end: 11, text: "よ" },
+      { start: 12, end: 13, text: "におい" },
+    ];
+    const chunks = buildChunks(text, { groupSize: 1, minChars: 0, maxChars: 10 }, undefined, rubies);
+    const texts = chunks.map((chunk) => chunk.text);
+    expect(texts.join("")).toBe(text);
+    expect(texts.some((chunk) => chunk.startsWith("の") || chunk.startsWith("が"))).toBe(false);
+  });
+
+  it("keeps reduplicated kana words such as ざらざら together", () => {
+    const segmenter = () => ["砂で", "ざら", "ざらしている。"];
+    const chunks = buildChunks("砂でざらざらしている。", { groupSize: 1, minChars: 0, maxChars: 10 }, segmenter);
+    expect(chunks.map((chunk) => chunk.text)).toEqual(["砂で", "ざらざらしている。"]);
+  });
 });
+

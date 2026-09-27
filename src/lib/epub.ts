@@ -1,5 +1,6 @@
 import JSZip from "jszip";
-import type { ParsedBook } from "./types";
+import type { ParsedBook, Ruby } from "./types";
+import { normalizeMarkedRubyText, RUBY_END_MARKER, RUBY_START_MARKER } from "./ruby";
 
 export class EpubImportError extends Error {
   constructor(message: string) {
@@ -52,7 +53,48 @@ function resolveArchivePath(baseFile: string, href: string): string {
   return parts.join("/");
 }
 
-function readableBlocks(document: Document): string[] {
+interface ReadableBlock {
+  text: string;
+  rubies: Ruby[];
+}
+
+function nodeTextWithoutRubyHints(node: Node): string {
+  if (node.nodeType === 3 || node.nodeType === 4) return node.nodeValue ?? "";
+  if (node.nodeType !== 1) return "";
+  const element = node as Element;
+  const name = localName(element);
+  if (name === "rt" || name === "rp") return "";
+  return Array.from(element.childNodes).map(nodeTextWithoutRubyHints).join("");
+}
+
+function markedNodeText(node: Node, readings: string[]): string {
+  if (node.nodeType === 3 || node.nodeType === 4) return node.nodeValue ?? "";
+  if (node.nodeType !== 1) return "";
+  const element = node as Element;
+  const name = localName(element);
+  if (name === "rt" || name === "rp") return "";
+  if (name === "ruby") {
+    const base = nodeTextWithoutRubyHints(element);
+    const reading = elements(element)
+      .filter((child) => localName(child) === "rt")
+      .map((child) => (child.textContent ?? "").replace(/\s+/gu, " ").trim())
+      .join("");
+    if (base && reading) {
+      readings.push(reading);
+      return `${RUBY_START_MARKER}${base}${RUBY_END_MARKER}`;
+    }
+    return base;
+  }
+  return Array.from(element.childNodes).map((child) => markedNodeText(child, readings)).join("");
+}
+
+function readableBlock(element: Element): ReadableBlock {
+  const readings: string[] = [];
+  const markedText = markedNodeText(element, readings);
+  return normalizeMarkedRubyText(markedText, readings, (value) => value.replace(/\s+/gu, " ").trim());
+}
+
+function readableBlocks(document: Document): ReadableBlock[] {
   const body = firstByLocalName(document, "body") ?? document.documentElement;
   const blockNames = new Set(["h1", "h2", "h3", "h4", "h5", "h6", "p"]);
   const containerNames = new Set(["blockquote", "li", "div", "section"]);
@@ -62,10 +104,10 @@ function readableBlocks(document: Document): string[] {
     if (!containerNames.has(name)) return false;
     return !elements(element).some((child) => blockNames.has(localName(child)) || containerNames.has(localName(child)));
   });
-  const text = blocks.map((element) => element.textContent ?? "").map((value) => value.replace(/\s+/gu, " ").trim()).filter(Boolean);
-  if (text.length) return text;
-  const fallback = (body.textContent ?? "").replace(/\s+/gu, " ").trim();
-  return fallback ? [fallback] : [];
+  const parsedBlocks = blocks.map(readableBlock).filter(({ text }) => Boolean(text));
+  if (parsedBlocks.length) return parsedBlocks;
+  const fallback = readableBlock(body);
+  return fallback.text ? [fallback] : [];
 }
 
 function removeElements(document: Document, names: ReadonlySet<string>): void {
@@ -137,15 +179,22 @@ export async function parseEpub(input: ArrayBuffer | Uint8Array): Promise<Parsed
     }
   }
 
-  const paragraphs: string[] = [];
+  const paragraphs: ReadableBlock[] = [];
   for (const chapterPath of chapterPaths) {
     const chapterFile = zip.file(chapterPath);
     if (!chapterFile) continue;
     const chapter = parseXml(await chapterFile.async("text"));
-    removeElements(chapter, new Set(["rt", "rp", "script", "style", "nav"]));
+    removeElements(chapter, new Set(["script", "style", "nav"]));
     paragraphs.push(...readableBlocks(chapter));
   }
-  const text = paragraphs.join("\n").trim();
+  let text = "";
+  const rubies: Ruby[] = [];
+  for (const paragraph of paragraphs) {
+    if (text) text += "\n";
+    const offset = Array.from(text).length;
+    text += paragraph.text;
+    rubies.push(...paragraph.rubies.map((ruby) => ({ ...ruby, start: ruby.start + offset, end: ruby.end + offset })));
+  }
   if (!text) throw new EpubImportError("EPUBから本文を取り出せませんでした。");
-  return { title, author, text, format: "epub" };
+  return { title, author, text, rubies, format: "epub" };
 }

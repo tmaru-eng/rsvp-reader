@@ -32,7 +32,7 @@ async function makeEpub(encryptionXml = "", chapterContent = "<p>本文の段落
 afterEach(() => vi.unstubAllGlobals());
 
 describe("text documents", () => {
-  it("detects Shift_JIS and removes Aozora ruby, notes, introduction, and bottom matter", async () => {
+  it("detects Shift_JIS and removes Aozora notes, introduction, and bottom matter while retaining ruby ranges", async () => {
     const bytes = new Uint8Array(await readFile(aozoraFixture));
     const book = parseTextDocument(bytes, "kumono_ito.txt");
 
@@ -41,6 +41,7 @@ describe("text documents", () => {
     expect(book.text).toContain("ある日の事でございます。");
     expect(book.text).toContain("御釈迦様は極楽の蓮池のふちを");
     expect(book.text).not.toContain("おしゃかさま");
+    expect(book.rubies.some(({ text }) => text === "おしゃかさま")).toBe(true);
     expect(book.text).not.toContain("テキスト中に現れる記号");
     expect(book.text).not.toContain("［＃");
     expect(book.text).not.toContain("底本：");
@@ -51,10 +52,27 @@ describe("text documents", () => {
 
     expect(book).toMatchObject({ title: "メモ", author: "", text: "第一段落\n第二段落" });
   });
+
+  it("extracts explicit and implicit Aozora ruby, including 々, while removing notes", () => {
+    const book = parseTextDocument("｜東京《とうきょう》［＃「東京」に傍点］へ行き、山々《やまやま》を見る。", "ルビ.txt");
+
+    expect(book.text).toBe("東京へ行き、山々を見る。");
+    expect(book.rubies).toEqual([
+      { start: 0, end: 2, text: "とうきょう" },
+      { start: 6, end: 8, text: "やまやま" },
+    ]);
+  });
+
+  it("counts ruby positions in Unicode code points", () => {
+    const book = parseTextDocument("😀｜東京《とうきょう》", "絵文字.txt");
+
+    expect(book.text).toBe("😀東京");
+    expect(book.rubies).toEqual([{ start: 1, end: 3, text: "とうきょう" }]);
+  });
 });
 
 describe("EPUB documents", () => {
-  it("reads spine order and metadata while dropping ruby readings and pronunciation hints", async () => {
+  it("reads spine order and metadata while keeping ruby readings out of plain text", async () => {
     vi.stubGlobal("DOMParser", DOMParser);
     const bytes = new Uint8Array(await readFile(epubFixture));
     const book = await parseEpub(bytes);
@@ -65,6 +83,15 @@ describe("EPUB documents", () => {
     expect(book.text).not.toContain("くも");
     expect(book.text).not.toContain("おしゃかさま");
     expect(book.text).not.toContain("（");
+  });
+
+  it("keeps EPUB ruby base text and records its reading without rp hints", async () => {
+    vi.stubGlobal("DOMParser", DOMParser);
+    const bytes = await makeEpub("", "<p><ruby>蜘蛛<rp>（</rp><rt>くも</rt><rp>）</rp></ruby>の糸</p>");
+    const book = await parseEpub(bytes);
+
+    expect(book.text).toBe("蜘蛛の糸");
+    expect(book.rubies).toEqual([{ start: 0, end: 2, text: "くも" }]);
   });
 
   it("reads EPUBs when encryption only obfuscates embedded fonts", async () => {

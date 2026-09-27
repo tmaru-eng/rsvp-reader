@@ -32,6 +32,12 @@ export interface BookRepository {
   close(): void;
 }
 
+function ensureRubyList(book: BookRecord | undefined): BookRecord | undefined {
+  if (!book) return undefined;
+  const rubies = (book as Partial<BookRecord>).rubies;
+  return { ...book, rubies: Array.isArray(rubies) ? rubies : [] };
+}
+
 export async function createBookRepository(
   factory: IDBFactory = indexedDB,
   databaseName = DATABASE_NAME,
@@ -49,7 +55,8 @@ export async function createBookRepository(
   return {
     async get(id) {
       const transaction = database.transaction(BOOK_STORE, "readonly");
-      return requestResult(transaction.objectStore(BOOK_STORE).get(id)) as Promise<BookRecord | undefined>;
+      const book = await requestResult(transaction.objectStore(BOOK_STORE).get(id)) as BookRecord | undefined;
+      return ensureRubyList(book);
     },
     async save(book) {
       const transaction = database.transaction(BOOK_STORE, "readwrite");
@@ -60,7 +67,7 @@ export async function createBookRepository(
       const transaction = database.transaction(BOOK_STORE, "readwrite");
       const request = transaction.objectStore(BOOK_STORE).get(id);
       request.onsuccess = () => {
-        const book = request.result as BookRecord | undefined;
+        const book = ensureRubyList(request.result as BookRecord | undefined);
         if (book) transaction.objectStore(BOOK_STORE).put({ ...book, position, lastViewedAt });
       };
       await transactionResult(transaction);
@@ -68,7 +75,7 @@ export async function createBookRepository(
     async listRecent() {
       const transaction = database.transaction(BOOK_STORE, "readonly");
       const books = (await requestResult(transaction.objectStore(BOOK_STORE).getAll())) as BookRecord[];
-      return books.sort((left, right) => right.lastViewedAt - left.lastViewedAt);
+      return books.map((book) => ensureRubyList(book)!).sort((left, right) => right.lastViewedAt - left.lastViewedAt);
     },
     close() {
       database.close();

@@ -1,5 +1,5 @@
 import { loadDefaultJapaneseParser } from "budoux";
-import type { Chunk } from "./types";
+import type { Chunk, Ruby } from "./types";
 
 const unsafeChunkStarts = new Set(Array.from("、。，．・：；？！,.:;!?…‥）〕］｝〉》」』】”’)]}»›ぁぃぅぇぉっゃゅょゎゕゖァィゥェォッャュョヮヵヶヷヸヹヺー"));
 const endsWithPunctuation = /[、。！？）」』】]$/u;
@@ -30,6 +30,34 @@ function mergeChunks(left: Chunk, right: Chunk): Chunk {
   return { ...left, text, endsWithPunct: endsWithPunctuation.test(text) };
 }
 
+const kanaRun = /^[\p{Script=Hiragana}\p{Script=Katakana}ー]+$/u;
+
+/**
+ * 「ざら｜ざら」「ぺか｜ぺか」のように、繰り返しの言葉（畳語）を割る BudouX の切れ目をつなぐ。
+ * 2026-09-27 の Jev 評価で、自然さの確率が最も低かった切れ目の型。
+ */
+function mergeReduplication(segments: string[]): string[] {
+  const result: string[] = [];
+  for (const segment of segments) {
+    const previous = result.at(-1);
+    if (previous !== undefined && splitsReduplication(previous, segment)) {
+      result[result.length - 1] = previous + segment;
+    } else {
+      result.push(segment);
+    }
+  }
+  return result;
+}
+
+function splitsReduplication(left: string, right: string): boolean {
+  const leftCharacters = Array.from(left);
+  for (let length = 2; length <= 4 && length <= leftCharacters.length; length += 1) {
+    const tail = leftCharacters.slice(-length).join("");
+    if (kanaRun.test(tail) && right.startsWith(tail)) return true;
+  }
+  return false;
+}
+
 function attachLeadingCharacters(segments: string[]): string[] {
   const result: string[] = [];
   let leading = "";
@@ -49,6 +77,51 @@ function attachLeadingCharacters(segments: string[]): string[] {
     else result.push(leading);
   }
   return result;
+}
+
+interface SegmentPart {
+  text: string;
+  start: number;
+  end: number;
+  isRuby: boolean;
+}
+
+function makeSegmentParts(paragraph: string, inputSegments: string[], rubyRanges: readonly Ruby[]): SegmentPart[] {
+  const segments = attachLeadingCharacters(mergeReduplication(inputSegments.filter(Boolean)));
+  const characterCount = countSourceChars(paragraph);
+  const boundaries = new Set<number>([0, characterCount]);
+  let cursorUtf16 = 0;
+
+  for (const segment of segments) {
+    const relativeStart = paragraph.indexOf(segment, cursorUtf16);
+    const startUtf16 = relativeStart >= 0 ? relativeStart : cursorUtf16;
+    const start = countSourceChars(paragraph.slice(0, startUtf16));
+    const end = start + countSourceChars(segment);
+    boundaries.add(start);
+    boundaries.add(end);
+    cursorUtf16 = startUtf16 + segment.length;
+  }
+
+  // ルビの親文字の前後を新しい切れ目にはしない（「金色《きんいろ》の」を「金色／の」と割らない）。
+  // 親文字の途中にある BudouX の切れ目だけを取り除く。
+  const orderedBoundaries = [...boundaries]
+    .filter((boundary) => !rubyRanges.some((ruby) => ruby.start < boundary && boundary < ruby.end))
+    .sort((left, right) => left - right);
+  const characters = Array.from(paragraph);
+  const parts: SegmentPart[] = [];
+  for (let index = 1; index < orderedBoundaries.length; index += 1) {
+    const start = orderedBoundaries[index - 1];
+    const end = orderedBoundaries[index];
+    if (start === undefined || end === undefined || end <= start) continue;
+    parts.push({
+      text: characters.slice(start, end).join(""),
+      start,
+      end,
+      // ルビを含む区切りは、長すぎても親文字を割らないよう分割しない。
+      isRuby: rubyRanges.some((ruby) => ruby.start < end && start < ruby.end),
+    });
+  }
+  return parts;
 }
 
 function splitOversizedSegment(segment: string, maxChars: number): string[] {
@@ -104,10 +177,10 @@ function groupSegments(
   inputSegments: string[],
   groupSize: number,
   maxChars: number,
+  rubyRanges: readonly Ruby[],
 ): Chunk[] {
-  const segments = attachLeadingCharacters(inputSegments.filter(Boolean));
+  const segments = makeSegmentParts(paragraph, inputSegments, rubyRanges);
   const grouped: Chunk[] = [];
-  let cursorUtf16 = 0;
   let pending: Chunk | undefined;
   let pendingSegmentCount = 0;
 
@@ -117,20 +190,23 @@ function groupSegments(
     pendingSegmentCount = 0;
   };
 
-  for (const segment of segments) {
-    const relativeStart = paragraph.indexOf(segment, cursorUtf16);
-    const startUtf16 = relativeStart >= 0 ? relativeStart : cursorUtf16;
-    cursorUtf16 = startUtf16 + segment.length;
-    const charStart = charOffset + countSourceChars(paragraph.slice(0, startUtf16));
-    const pieces = splitOversizedSegment(segment, maxChars);
+  for (const part of segments) {
+    const segment = part.text;
+    const charStart = charOffset + part.start;
+    if (part.isRuby && displayWidth(segment) > maxChars) {
+      flushPending();
+      grouped.push({ text: segment, charStart, paragraphIndex, endsWithPunct: endsWithPunctuation.test(segment) });
+      continue;
+    }
+
+    const pieces = part.isRuby ? [segment] : splitOversizedSegment(segment, maxChars);
 
     if (pieces.length > 1 || displayWidth(segment) > maxChars) {
       flushPending();
-      let pieceUtf16 = startUtf16;
+      let pieceStart = part.start;
       for (const piece of pieces) {
-        const pieceStart = charOffset + countSourceChars(paragraph.slice(0, pieceUtf16));
-        grouped.push({ text: piece, charStart: pieceStart, paragraphIndex, endsWithPunct: endsWithPunctuation.test(piece) });
-        pieceUtf16 += piece.length;
+        grouped.push({ text: piece, charStart: charOffset + pieceStart, paragraphIndex, endsWithPunct: endsWithPunctuation.test(piece) });
+        pieceStart += countSourceChars(piece);
       }
       continue;
     }
@@ -193,6 +269,7 @@ export function buildChunks(
   text: string,
   options: ChunkOptions,
   segmenter: Segmenter = (paragraph) => japaneseParser.parse(paragraph),
+  rubies: readonly Ruby[] = [],
 ): Chunk[] {
   const chunks: Chunk[] = [];
   const maxChars = Math.max(1, options.maxChars);
@@ -207,7 +284,11 @@ export function buildChunks(
       // 見出しのような短く句読点のない行（例：「はしがき」）は、BudouX が細かく割りすぎるので分けない。
       const headingLike = displayWidth(content) <= Math.min(maxChars, HEADING_MAX_CHARS) && !headingBreakers.test(content);
       const segments = headingLike ? [content] : segmenter(content).filter(Boolean);
-      const grouped = groupSegments(content, paragraphIndex, normalizedOffset, segments, options.groupSize, maxChars);
+      const contentLength = countSourceChars(content);
+      const paragraphRubies = rubies
+        .filter((ruby) => ruby.start >= normalizedOffset && ruby.end <= normalizedOffset + contentLength)
+        .map((ruby) => ({ ...ruby, start: ruby.start - normalizedOffset, end: ruby.end - normalizedOffset }));
+      const grouped = groupSegments(content, paragraphIndex, normalizedOffset, segments, options.groupSize, maxChars, paragraphRubies);
       chunks.push(...enforceMinimumLength(grouped, options.minChars, maxChars));
     }
     charOffset += countSourceChars(paragraph) + 1;

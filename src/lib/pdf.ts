@@ -212,6 +212,7 @@ export async function parsePdf(
     title: filenameTitle(filename),
     author: "",
     text,
+    rubies: [],
     format: "pdf",
     warning: isVertical ? "縦書きPDFを右の列から順に読み取りました。段組みや注釈があると順序が崩れることがあります。" : undefined,
   };

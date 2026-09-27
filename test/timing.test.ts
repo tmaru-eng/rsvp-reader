@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { calculateChunkDuration, calculateRemainingTime } from "../src/lib/timing";
+import { calculateChunkDuration, calculateRemainingTime, calculateTimingCoefficient } from "../src/lib/timing";
 
 describe("RSVP timing", () => {
   it("uses displayed character width by default", () => {
@@ -58,5 +58,29 @@ describe("RSVP timing", () => {
 
     expect(calculateRemainingTime(chunks, 1, 600, { maxChars: 5 })).toBe(980);
     expect(calculateRemainingTime(chunks, 3, 600, { maxChars: 5 })).toBe(0);
+  });
+
+  it("normalizes a book's total display time to its text length and configured speed", () => {
+    const chunks = [
+      { text: "私は", endsWithPunct: false, paragraphIndex: 0 },
+      { text: "読む、", endsWithPunct: true, paragraphIndex: 0 },
+      { text: "二文。", endsWithPunct: true, paragraphIndex: 1 },
+    ];
+    const speed = 450;
+    const totalChars = Array.from("私は読む、\n二文。").length;
+    const options = {
+      maxChars: 5,
+      proportionality: 100,
+      commaPause: 1.3,
+      sentencePause: 1.8,
+      paragraphPause: 2.2,
+      minDuration: 200,
+    };
+    const coefficient = calculateTimingCoefficient(chunks, speed, options, totalChars);
+    const totalDuration = calculateRemainingTime(chunks, 0, speed, { ...options, coefficient });
+    const actualSpeed = totalChars / (totalDuration / 60_000);
+
+    expect(actualSpeed).toBeGreaterThanOrEqual(speed * 0.98);
+    expect(actualSpeed).toBeLessThanOrEqual(speed * 1.02);
   });
 });

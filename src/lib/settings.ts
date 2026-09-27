@@ -7,6 +7,7 @@ export interface ReaderSettings extends Omit<ChunkOptions, "maxChars"> {
   fontSize: number;
   punctuationPause: boolean;
   focusGuides: boolean;
+  showRuby: boolean;
   proportionality: number;
   commaPause: number;
   sentencePause: number;
@@ -18,13 +19,15 @@ export const SETTINGS_STORAGE_KEY = "rsvp-reader.settings.v1";
 
 // 既定値の根拠は docs/research-defaults.md。速度は大学生の黙読平均 653字/分（小林・川島 2018）より低め、
 // 注視ガイドは誘導なしのほうが理解度が高かった日本語 RSVP 実験（石森・桐谷 2024）に合わせて既定でオフ。
+// 最小字数 4 は、2026-09-27 に Jev で 8 通りの区切り設定を採点して首位だったもの（次点との差は誤差の範囲）。
 export const DEFAULT_SETTINGS: ReaderSettings = {
   speed: 450,
   groupSize: 1,
-  minChars: 3,
+  minChars: 4,
   fontSize: 56,
   punctuationPause: true,
   focusGuides: false,
+  showRuby: true,
   breakReminder: true,
   proportionality: 100,
   commaPause: 1.3,
@@ -62,6 +65,7 @@ export function parseSettings(raw: string | null, defaultFontSize = DEFAULT_SETT
       fontSize: boundedNumber(values.fontSize, defaultFontSize, 32, 96),
       punctuationPause: typeof values.punctuationPause === "boolean" ? values.punctuationPause : DEFAULT_SETTINGS.punctuationPause,
       focusGuides: typeof values.focusGuides === "boolean" ? values.focusGuides : DEFAULT_SETTINGS.focusGuides,
+      showRuby: typeof values.showRuby === "boolean" ? values.showRuby : DEFAULT_SETTINGS.showRuby,
       breakReminder: typeof values.breakReminder === "boolean" ? values.breakReminder : DEFAULT_SETTINGS.breakReminder,
       proportionality: boundedNumber(values.proportionality, DEFAULT_SETTINGS.proportionality, 0, 100),
       commaPause: boundedDecimal(values.commaPause, DEFAULT_SETTINGS.commaPause, 1, 3),

@@ -1,4 +1,5 @@
 import type { ParsedBook } from "./types";
+import { normalizeMarkedRubyText, RUBY_END_MARKER, RUBY_START_MARKER } from "./ruby";
 
 function toBytes(input: ArrayBuffer | Uint8Array): Uint8Array {
   return input instanceof Uint8Array ? input : new Uint8Array(input);
@@ -32,15 +33,32 @@ function normalizeBody(body: string): string {
 }
 
 export function cleanAozoraText(source: string): string {
-  return normalizeBody(
-    source
-      .replace(/^\s*-{7,}[ \t]*\n[\s\S]*?\n[ \t]*-{7,}[ \t]*(?:\n|$)/mu, "\n")
-      .replace(/^底本：[\s\S]*$/mu, "")
-      .replace(/※(?=［＃)/gu, "")
-      .replace(/［＃[^］]*］/gu, "")
-      .replace(/《[^》]*》/gu, "")
-      .replace(/｜/gu, ""),
-  );
+  return parseAozoraBody(source).text;
+}
+
+function parseAozoraBody(source: string): { text: string; rubies: ParsedBook["rubies"] } {
+  const cleanSource = source
+    .replace(/^\s*-{7,}[ \t]*\n[\s\S]*?\n[ \t]*-{7,}[ \t]*(?:\n|$)/mu, "\n")
+    .replace(/^底本：[\s\S]*$/mu, "")
+    .replace(/※(?=［＃)/gu, "")
+    .replace(/［＃[^］]*］/gu, "");
+  const rubyPattern = /｜([^《｜]+)《([^》]*)》|([\p{Script=Han}々〆ヶ〇]+)《([^》]*)》/gu;
+  const readings: string[] = [];
+  let markedText = "";
+  let cursor = 0;
+
+  for (const match of cleanSource.matchAll(rubyPattern)) {
+    const index = match.index ?? cursor;
+    markedText += cleanSource.slice(cursor, index).replace(/｜/gu, "");
+    const base = match[1] ?? match[3] ?? "";
+    const reading = match[2] ?? match[4] ?? "";
+    markedText += `${RUBY_START_MARKER}${base}${RUBY_END_MARKER}`;
+    readings.push(reading);
+    cursor = index + match[0].length;
+  }
+
+  markedText += cleanSource.slice(cursor).replace(/｜/gu, "");
+  return normalizeMarkedRubyText(markedText, readings, normalizeBody);
 }
 
 export function parseTextDocument(input: string | ArrayBuffer | Uint8Array, filename = "貼り付け.txt"): ParsedBook {
@@ -49,26 +67,28 @@ export function parseTextDocument(input: string | ArrayBuffer | Uint8Array, file
   let title = titleFromFilename(filename);
   let author = "";
   let text = source;
+  let rubies: ParsedBook["rubies"] = [];
 
   if (isAozora) {
-    const headerLines = source.split("\n").filter((line) => line.trim()).slice(0, 2);
-    title = headerLines[0]?.trim() || title;
-    author = headerLines[1]?.trim() || "";
+    const hasAozoraHeader = source.split("\n").slice(0, 8).some((line) => /^[ \t]*-{7,}[ \t]*$/u.test(line));
     let skippedHeaderLines = 0;
-    text = source
-      .split("\n")
-      .filter((line) => {
+    const body = hasAozoraHeader
+      ? source.split("\n").filter((line) => {
         if (skippedHeaderLines < 2 && line.trim()) {
+          if (skippedHeaderLines === 0) title = line.trim();
+          else author = line.trim();
           skippedHeaderLines += 1;
           return false;
         }
         return true;
-      })
-      .join("\n");
-    text = cleanAozoraText(text);
+      }).join("\n")
+      : source;
+    const parsed = parseAozoraBody(body);
+    text = parsed.text;
+    rubies = parsed.rubies;
   } else {
     text = normalizeBody(text);
   }
 
-  return { title, author, text, format: "txt" };
+  return { title, author, text, rubies, format: "txt" };
 }

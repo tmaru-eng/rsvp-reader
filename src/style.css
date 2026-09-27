@@ -467,9 +467,19 @@ label:focus-within {
   color: var(--ink);
   font-family: "Hiragino Mincho ProN", "Yu Mincho", "Noto Serif JP", serif;
   font-size: var(--reader-size, 56px);
-  line-height: 1.55;
+  line-height: 2.2;
   text-align: center;
   white-space: nowrap;
+}
+
+.current-chunk ruby {
+  ruby-position: over;
+  ruby-align: center;
+}
+
+.current-chunk rt {
+  font-size: 0.45em;
+  line-height: 1;
 }
 
 .reader-footer {

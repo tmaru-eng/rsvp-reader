@@ -186,6 +186,9 @@ function enforceMinimumLength(chunks: Chunk[], minChars: number, maxChars: numbe
   return result;
 }
 
+const HEADING_MAX_CHARS = 8;
+const headingBreakers = /[、。，．！？!?「」『』（）()…‥]/u;
+
 export function buildChunks(
   text: string,
   options: ChunkOptions,
@@ -201,7 +204,9 @@ export function buildChunks(
     const content = paragraph.trim();
     if (content) {
       const normalizedOffset = charOffset + countSourceChars(leading);
-      const segments = segmenter(content).filter(Boolean);
+      // 見出しのような短く句読点のない行（例：「はしがき」）は、BudouX が細かく割りすぎるので分けない。
+      const headingLike = displayWidth(content) <= Math.min(maxChars, HEADING_MAX_CHARS) && !headingBreakers.test(content);
+      const segments = headingLike ? [content] : segmenter(content).filter(Boolean);
       const grouped = groupSegments(content, paragraphIndex, normalizedOffset, segments, options.groupSize, maxChars);
       chunks.push(...enforceMinimumLength(grouped, options.minChars, maxChars));
     }

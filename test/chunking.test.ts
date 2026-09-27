@@ -85,6 +85,13 @@ describe("buildChunks", () => {
     expect(Math.max(...lengths) - Math.min(...lengths)).toBeLessThanOrEqual(2);
   });
 
+  it("keeps a short heading-like line without punctuation as one chunk", () => {
+    const chunks = buildChunks("はしがき\n私は、その男の写真を三葉、見たことがある。", { groupSize: 1, minChars: 0, maxChars: 10 });
+    expect(chunks[0]?.text).toBe("はしがき");
+    expect(chunks.slice(1).map((chunk) => chunk.text).join("")).toBe("私は、その男の写真を三葉、見たことがある。");
+    expect(chunks.length).toBeGreaterThan(3);
+  });
+
   it("keeps punctuation, closing brackets, small kana and long vowel marks off chunk boundaries", () => {
     const phrase = "あいうえお、）ゃーかきくけこ。";
     const chunks = buildChunks(phrase, { groupSize: 1, minChars: 0, maxChars: 5 }, () => [phrase]);

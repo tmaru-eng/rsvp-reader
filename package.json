@@ -6,6 +6,7 @@
   "scripts": {
     "test": "vitest run",
     "dev": "vite",
+    "build:aozora": "node scripts/build-aozora-index.mjs",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview"
   },

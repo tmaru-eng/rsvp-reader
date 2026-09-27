@@ -1,5 +1,11 @@
 import "./style.css";
-import { AOZORA_BOOKS, fetchAozoraBook } from "./lib/aozora";
+import { fetchAozoraBook, type AozoraBook } from "./lib/aozora";
+import {
+  AOZORA_INDEX_MISSING_MESSAGE,
+  fetchAozoraIndex,
+  searchAozoraIndex,
+  type AozoraIndexBook,
+} from "./lib/aozora-search";
 import { buildChunks, type ChunkOptions } from "./lib/chunking";
 import { isEpubFilename, parseEpub } from "./lib/epub";
 import { DEFAULT_SETTINGS, loadSettings, saveSettings, type ReaderSettings } from "./lib/settings";
@@ -33,6 +39,9 @@ class ReaderApp {
   private activeMaxChars = 1;
   private resizeObserver: ResizeObserver | undefined;
   private layoutFrame: number | undefined;
+  private aozoraIndex: AozoraIndexBook[] | null | undefined;
+  private aozoraIndexLoad: Promise<AozoraIndexBook[] | null> | undefined;
+  private aozoraSearchTimerId: number | undefined;
 
   constructor(private readonly appRoot: HTMLElement) {
     this.settings = loadSettings();
@@ -91,7 +100,9 @@ class ReaderApp {
               <div class="library-heading">
                 <h2 id="aozora-title">青空文庫から読む</h2>
               </div>
-              <div class="aozora-grid" id="aozora-list"></div>
+              <label class="aozora-search-label" for="aozora-search">作品名や作者名で検索</label>
+              <input class="aozora-search-input" id="aozora-search" type="search" placeholder="作品名・読み・作者名" autocomplete="off" aria-controls="aozora-list" />
+              <div class="aozora-grid" id="aozora-list" aria-live="polite"></div>
               <small class="aozora-attribution">出典：青空文庫（aozorahack/aozorabunko_text の写し） · <a href="https://www.aozora.gr.jp/" target="_blank" rel="noopener noreferrer">青空文庫</a></small>
             </section>
 
@@ -212,29 +223,7 @@ class ReaderApp {
         </main>
       </div>
     `;
-    this.renderAozoraBooks();
-  }
-
-  private renderAozoraBooks(): void {
-    const list = this.element<HTMLDivElement>("#aozora-list");
-    const fragment = document.createDocumentFragment();
-    for (const work of AOZORA_BOOKS) {
-      const button = document.createElement("button");
-      button.className = "aozora-book";
-      button.type = "button";
-      button.dataset.aozoraId = work.id;
-      button.setAttribute("aria-label", `${work.title}（${work.author}）を読む`);
-
-      const title = document.createElement("span");
-      title.className = "aozora-book-title";
-      title.textContent = work.title;
-      const author = document.createElement("span");
-      author.className = "aozora-book-author";
-      author.textContent = work.author;
-      button.append(title, author);
-      fragment.append(button);
-    }
-    list.replaceChildren(fragment);
+    this.renderAozoraMessage("作品名や作者名を入力してください。");
   }
 
   private bindEvents(): void {
@@ -250,12 +239,15 @@ class ReaderApp {
       }
       void this.importParsed(parseTextDocument(text, "貼り付け.txt"));
     });
+    const aozoraSearch = this.element<HTMLInputElement>("#aozora-search");
+    aozoraSearch.addEventListener("focus", () => this.scheduleAozoraSearch());
+    aozoraSearch.addEventListener("input", () => this.scheduleAozoraSearch());
     this.element<HTMLDivElement>("#aozora-list").addEventListener("click", (event) => {
       const target = event.target;
       if (!(target instanceof Element)) return;
       const button = target.closest<HTMLButtonElement>("[data-aozora-id]");
-      const work = AOZORA_BOOKS.find(({ id }) => id === button?.dataset.aozoraId);
-      if (work) void this.importAozora(work);
+      const work = this.aozoraIndex?.find(({ id }) => id === button?.dataset.aozoraId);
+      if (work) void this.importAozora({ id: work.id, title: work.title, author: work.authors, path: work.path });
     });
     this.element<HTMLButtonElement>("#change-book").addEventListener("click", () => this.showLibrary());
     this.element<HTMLButtonElement>("#go-to-start").addEventListener("click", () => this.goToStart());
@@ -442,7 +434,93 @@ class ReaderApp {
     }
   }
 
-  private async importAozora(work: (typeof AOZORA_BOOKS)[number]): Promise<void> {
+  private renderAozoraMessage(message: string): void {
+    const status = document.createElement("p");
+    status.className = "aozora-search-message";
+    status.textContent = message;
+    this.element<HTMLDivElement>("#aozora-list").replaceChildren(status);
+  }
+
+  private loadAozoraIndex(): Promise<AozoraIndexBook[] | null> {
+    if (this.aozoraIndex !== undefined) return Promise.resolve(this.aozoraIndex);
+    if (this.aozoraIndexLoad) return this.aozoraIndexLoad;
+
+    this.renderAozoraMessage("検索データを読み込んでいます…");
+    const loading = fetchAozoraIndex(fetch, `${import.meta.env.BASE_URL}aozora-index.json`)
+      .then((index) => {
+        this.aozoraIndex = index;
+        if (!index) this.renderAozoraMessage(AOZORA_INDEX_MISSING_MESSAGE);
+        return index;
+      })
+      .catch(() => {
+        this.renderAozoraMessage(AOZORA_INDEX_MISSING_MESSAGE);
+        return null;
+      })
+      .finally(() => {
+        this.aozoraIndexLoad = undefined;
+      });
+    this.aozoraIndexLoad = loading;
+    return loading;
+  }
+
+  private scheduleAozoraSearch(): void {
+    if (this.aozoraSearchTimerId !== undefined) window.clearTimeout(this.aozoraSearchTimerId);
+    this.aozoraSearchTimerId = undefined;
+    void this.loadAozoraIndex().then((index) => {
+      if (!index) return;
+      if (this.aozoraSearchTimerId !== undefined) window.clearTimeout(this.aozoraSearchTimerId);
+      this.aozoraSearchTimerId = window.setTimeout(() => {
+        this.aozoraSearchTimerId = undefined;
+        const query = this.element<HTMLInputElement>("#aozora-search").value;
+        this.renderAozoraSearchResults(query);
+      }, 150);
+    });
+  }
+
+  private renderAozoraSearchResults(query: string): void {
+    if (!query.trim()) {
+      this.renderAozoraMessage("作品名や作者名を入力してください。");
+      return;
+    }
+    const books = this.aozoraIndex;
+    if (!books) {
+      this.renderAozoraMessage(AOZORA_INDEX_MISSING_MESSAGE);
+      return;
+    }
+    const results = searchAozoraIndex(books, query);
+    if (results.length === 0) {
+      this.renderAozoraMessage("該当する作品はありません。");
+      return;
+    }
+
+    const fragment = document.createDocumentFragment();
+    for (const work of results) {
+      const button = document.createElement("button");
+      button.className = "aozora-book";
+      button.type = "button";
+      button.dataset.aozoraId = work.id;
+      button.setAttribute("aria-label", `${work.title}（${work.authors}）を読む`);
+
+      const title = document.createElement("span");
+      title.className = "aozora-book-title";
+      title.textContent = work.title;
+      button.append(title);
+      if (work.subtitle) {
+        const subtitle = document.createElement("span");
+        subtitle.className = "aozora-book-subtitle";
+        subtitle.textContent = work.subtitle;
+        button.append(subtitle);
+      }
+      const details = document.createElement("span");
+      details.className = "aozora-book-meta";
+      details.textContent = [work.authors, work.characterType].filter(Boolean).join(" · ");
+      button.append(details);
+      fragment.append(button);
+    }
+    this.element<HTMLDivElement>("#aozora-list").replaceChildren(fragment);
+  }
+
+  private async importAozora(work: AozoraBook): Promise<void> {
     this.showLoading(`「${work.title}」を青空文庫から読み込んでいます…`);
     this.clearError();
     try {

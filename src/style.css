@@ -276,19 +276,39 @@ label:focus-within {
   margin-top: 28px;
 }
 
+.aozora-search-label {
+  display: block;
+  margin: 0 0 7px;
+  color: #5e5b54;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.aozora-search-input {
+  width: 100%;
+  min-height: 46px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--panel);
+  color: var(--ink);
+  font-size: 16px;
+}
+
 .aozora-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr));
   gap: 8px;
+  margin-top: 9px;
 }
 
 .aozora-book {
-  display: grid;
+  display: flex;
+  width: 100%;
   min-width: 0;
-  min-height: 72px;
-  align-content: center;
+  flex-direction: column;
+  align-items: flex-start;
   gap: 5px;
-  padding: 10px 12px;
+  padding: 11px 13px;
   border: 1px solid var(--line);
   border-radius: 9px;
   background: var(--panel);
@@ -303,15 +323,30 @@ label:focus-within {
 }
 
 .aozora-book-title {
+  display: block;
   overflow-wrap: anywhere;
   font-size: 14px;
   font-weight: 600;
   line-height: 1.4;
 }
 
-.aozora-book-author {
+.aozora-book-subtitle {
+  overflow-wrap: anywhere;
+  color: #5e5b54;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.aozora-book-meta,
+.aozora-search-message {
   color: var(--muted);
   font-size: 12px;
+}
+
+.aozora-search-message {
+  margin: 0;
+  padding: 12px 1px;
+  line-height: 1.6;
 }
 
 .aozora-attribution {
@@ -679,6 +714,15 @@ label:focus-within {
   .import-panel {
     gap: 14px;
     padding: 13px;
+  }
+
+  .aozora-search-input {
+    min-height: 48px;
+    padding: 11px 12px;
+  }
+
+  .aozora-book {
+    padding: 12px;
   }
 
   .drop-zone {

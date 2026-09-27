@@ -1,5 +1,5 @@
 import "./style.css";
-import { buildChunks } from "./lib/chunking";
+import { buildChunks, type ChunkOptions } from "./lib/chunking";
 import { parseEpub } from "./lib/epub";
 import { loadSettings, saveSettings, type ReaderSettings } from "./lib/settings";
 import { createBookRepository, sha256Text, type BookRepository } from "./lib/storage";
@@ -21,6 +21,9 @@ class ReaderApp {
   private nextDeadline: number | undefined;
   private wakeLock: WakeLockSentinel | undefined;
   private pointerStart: { x: number; y: number } | undefined;
+  private activeMaxChars = 1;
+  private resizeObserver: ResizeObserver | undefined;
+  private layoutFrame: number | undefined;
 
   constructor(private readonly appRoot: HTMLElement) {
     this.settings = loadSettings();
@@ -197,6 +200,12 @@ class ReaderApp {
     this.bindSettingsEvents();
     this.bindDropEvents();
     window.addEventListener("keydown", (event) => this.handleKeyDown(event));
+    window.addEventListener("resize", () => this.scheduleLayoutUpdate());
+    window.addEventListener("orientationchange", () => this.scheduleLayoutUpdate());
+    if (typeof ResizeObserver !== "undefined") {
+      this.resizeObserver = new ResizeObserver(() => this.scheduleLayoutUpdate());
+      this.resizeObserver.observe(this.element<HTMLDivElement>("#reading-stage"));
+    }
     document.addEventListener("visibilitychange", () => {
       if (document.visibilityState === "visible" && this.isPlaying) void this.requestWakeLock();
     });
@@ -219,7 +228,7 @@ class ReaderApp {
     });
     this.element<HTMLInputElement>("#font-size").addEventListener("input", (event) => {
       this.settings.fontSize = Number((event.currentTarget as HTMLInputElement).value);
-      this.settingsChanged(false);
+      this.settingsChanged(false, true);
     });
     this.element<HTMLInputElement>("#punctuation-pause").addEventListener("change", (event) => {
       this.settings.punctuationPause = (event.currentTarget as HTMLInputElement).checked;
@@ -315,11 +324,12 @@ class ReaderApp {
       totalChars: Array.from(parsed.text).length,
     };
     this.currentBook = record;
-    this.chunks = buildChunks(record.text, this.chunkOptions());
+    this.chunks = buildChunks(record.text, this.chunkOptions(Number.MAX_SAFE_INTEGER));
     this.currentIndex = this.clampIndex(record.position);
     this.currentBook.position = this.currentIndex;
-    await this.repository?.save(this.currentBook);
     this.showReader(parsed.warning);
+    this.rebuildChunks();
+    await this.repository?.save(this.currentBook);
     await this.refreshRecentBooks();
   }
 
@@ -334,11 +344,12 @@ class ReaderApp {
       const saved = await this.repository.get(id);
       if (!saved) throw new Error("この本のしおりが見つかりません。");
       this.currentBook = { ...saved, lastViewedAt: Date.now() };
-      this.chunks = buildChunks(saved.text, this.chunkOptions());
+      this.chunks = buildChunks(saved.text, this.chunkOptions(Number.MAX_SAFE_INTEGER));
       this.currentIndex = this.clampIndex(saved.position);
       this.currentBook.position = this.currentIndex;
-      await this.repository.save(this.currentBook);
       this.showReader();
+      this.rebuildChunks();
+      await this.repository.save(this.currentBook);
       await this.refreshRecentBooks();
     } catch (error) {
       this.showError(error instanceof Error ? error.message : "しおりを開けませんでした。");
@@ -408,25 +419,37 @@ class ReaderApp {
     void this.refreshRecentBooks();
   }
 
-  private chunkOptions(): { groupSize: 1 | 2 | 3; minChars: 0 | 2 | 3 | 4 } {
-    return { groupSize: this.settings.groupSize, minChars: this.settings.minChars };
+  private chunkOptions(maxChars = this.calculateMaxChars()): ChunkOptions {
+    return { groupSize: this.settings.groupSize, minChars: this.settings.minChars, maxChars };
   }
 
   private rebuildChunks(): void {
     if (!this.currentBook) return;
     const currentChar = this.chunks[this.currentIndex]?.charStart ?? 0;
-    this.chunks = buildChunks(this.currentBook.text, this.chunkOptions());
-    const matchingIndex = this.chunks.findIndex((chunk) => chunk.charStart >= currentChar);
-    this.currentIndex = matchingIndex < 0 ? this.clampIndex(this.chunks.length - 1) : matchingIndex;
+    const options = this.chunkOptions();
+    this.activeMaxChars = options.maxChars;
+    this.chunks = buildChunks(this.currentBook.text, options);
+    let matchingIndex = 0;
+    for (let index = 0; index < this.chunks.length; index += 1) {
+      const chunk = this.chunks[index];
+      if (!chunk || chunk.charStart > currentChar) break;
+      matchingIndex = index;
+    }
+    this.currentIndex = this.clampIndex(matchingIndex);
     this.currentBook.position = this.currentIndex;
     if (this.isPlaying) this.resetCurrentDeadline();
     this.updateReadingView();
     void this.persistPosition();
   }
 
-  private settingsChanged(restartCurrentChunk: boolean): void {
+  private settingsChanged(restartCurrentChunk: boolean, reflowChunks = false): void {
     saveSettings(this.settings);
     this.syncSettingsControls();
+    if (reflowChunks) {
+      this.updateReadingView();
+      this.rebuildChunks();
+      return;
+    }
     if (restartCurrentChunk && this.isPlaying) this.resetCurrentDeadline();
     this.updateReadingView();
   }
@@ -448,18 +471,57 @@ class ReaderApp {
     stage.style.setProperty("--reader-size", `${this.settings.fontSize}px`);
     this.element<HTMLButtonElement>("#play-toggle").textContent = this.isPlaying ? "Ⅱ 停止" : "▶ 再生";
     const chunk = this.chunks[this.currentIndex];
-    this.element<HTMLDivElement>("#current-chunk").textContent = chunk?.text ?? "ファイルを選ぶか、文章を貼り付けてください。";
+    const chunkElement = this.element<HTMLDivElement>("#current-chunk");
+    chunkElement.style.fontSize = "";
+    chunkElement.textContent = chunk?.text ?? "ファイルを選ぶか、文章を貼り付けてください。";
+    this.fitChunkToStage(chunkElement);
     const total = this.currentBook?.totalChars ?? 0;
     const charsRead = chunk ? Math.min(total, chunk.charStart + Array.from(chunk.text).length) : 0;
     this.element<HTMLProgressElement>("#progress").value = total ? charsRead / total : 0;
     this.element<HTMLElement>("#progress-count").textContent = `${charsRead.toLocaleString("ja-JP")} / ${total.toLocaleString("ja-JP")}字`;
     const remaining = calculateRemainingTime(this.chunks, this.currentIndex, this.settings.speed, {
       punctuationPause: this.settings.punctuationPause,
+      maxChars: this.activeMaxChars,
     });
     const seconds = Math.ceil(remaining / 1000);
     this.element<HTMLElement>("#remaining-time").textContent = `残り 約${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
     this.element<HTMLButtonElement>("#go-to-start").disabled = !this.currentBook || this.currentIndex === 0;
     this.element<HTMLButtonElement>("#play-toggle").disabled = !this.currentBook || this.chunks.length === 0;
+  }
+
+  private calculateMaxChars(): number {
+    const stage = this.element<HTMLDivElement>("#reading-stage");
+    const style = window.getComputedStyle(stage);
+    const padding = Number.parseFloat(style.paddingLeft) + Number.parseFloat(style.paddingRight);
+    const innerWidth = Math.max(0, stage.clientWidth - padding);
+    return Math.max(1, Math.floor(innerWidth / (this.settings.fontSize * 0.8)));
+  }
+
+  private scheduleLayoutUpdate(): void {
+    if (!this.currentBook || this.element<HTMLElement>("#reader").classList.contains("is-hidden") || this.layoutFrame !== undefined) return;
+    this.layoutFrame = window.requestAnimationFrame(() => {
+      this.layoutFrame = undefined;
+      if (!this.currentBook || this.element<HTMLElement>("#reader").classList.contains("is-hidden")) return;
+      if (this.calculateMaxChars() !== this.activeMaxChars) this.rebuildChunks();
+      else this.fitChunkToStage(this.element<HTMLDivElement>("#current-chunk"));
+    });
+  }
+
+  private fitChunkToStage(chunkElement: HTMLDivElement): void {
+    const preferredSize = this.settings.fontSize;
+    const minimumSize = preferredSize * 0.8;
+    chunkElement.style.fontSize = "";
+    if (!chunkElement.isConnected) return;
+    // 表示と同じフレームで縮める（次のフレームまで待つと、はみ出した状態が一瞬見える）。
+    const available = chunkElement.clientWidth;
+    const needed = chunkElement.scrollWidth;
+    if (available <= 0 || needed <= available) return;
+    let fontSize = Math.max(minimumSize, Math.floor(preferredSize * (available / needed) * 10) / 10);
+    chunkElement.style.fontSize = `${fontSize}px`;
+    while (fontSize > minimumSize && chunkElement.scrollWidth > chunkElement.clientWidth) {
+      fontSize = Math.max(minimumSize, fontSize - 1);
+      chunkElement.style.fontSize = `${fontSize}px`;
+    }
   }
 
   private clampIndex(index: number): number {
@@ -542,12 +604,13 @@ class ReaderApp {
 
   private chunkDuration(index: number): number {
     const chunk = this.chunks[index];
-    if (!chunk) return 120;
+    if (!chunk) return 150;
     const next = this.chunks[index + 1];
     const paragraphEnd = !next || next.paragraphIndex !== chunk.paragraphIndex;
     return calculateChunkDuration(chunk, this.settings.speed, {
       punctuationPause: this.settings.punctuationPause,
       paragraphEnd,
+      maxChars: this.activeMaxChars,
     });
   }
 

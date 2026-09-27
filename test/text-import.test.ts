@@ -69,6 +69,7 @@ describe("PDF documents", () => {
     expect(book.text).toContain("日本語PDF抽出テスト");
     expect(book.text).toContain("蜘蛛の糸は、極楽の蓮池から地獄へ垂れています。");
     expect(book.text).toContain("芥川龍之介の作品です。");
+    expect(book.text).toBe("日本語PDF抽出テスト\n蜘蛛の糸は、極楽の蓮池から地獄へ垂れています。芥川龍之介の作品です。");
     expect(book.text).not.toContain(" ");
   });
 });

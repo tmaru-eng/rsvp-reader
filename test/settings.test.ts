@@ -37,4 +37,11 @@ describe("reader settings", () => {
     storage.setItem("rsvp-reader.settings.v1", JSON.stringify({ speed: 9999, groupSize: 8, minChars: 9, fontSize: 2 }));
     expect(loadSettings(storage)).toMatchObject({ speed: 3000, groupSize: 1, minChars: 0, fontSize: 32 });
   });
+
+  it("defaults to 40px below 600px wide unless a saved font size exists", () => {
+    const storage = memoryStorage();
+    expect(loadSettings(storage, 390).fontSize).toBe(40);
+    saveSettings({ ...DEFAULT_SETTINGS, fontSize: 48 }, storage);
+    expect(loadSettings(storage, 390).fontSize).toBe(48);
+  });
 });

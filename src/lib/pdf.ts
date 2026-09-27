@@ -17,6 +17,13 @@ interface TextRow {
   text: string;
   y: number;
   height: number;
+  x: number;
+}
+
+interface TextPage {
+  rows: TextRow[];
+  minX: number;
+  longestLine: number;
 }
 
 export class PdfImportError extends Error {
@@ -50,7 +57,7 @@ export async function parsePdf(
     disableFontFace: options.disableFontFace,
   });
   const pdf = await loadingTask.promise;
-  const pageTexts: string[] = [];
+  const pages: TextPage[] = [];
   let isVertical = false;
 
   for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
@@ -62,32 +69,68 @@ export async function parsePdf(
       const item = unknownItem;
       if (item.dir === "ttb") isVertical = true;
       const y = item.transform[5] ?? 0;
+      const x = item.transform[4] ?? 0;
       const height = Math.abs(item.height) || Math.abs(item.transform[3] ?? 0) || 12;
       const currentRow = rows.at(-1);
       if (currentRow && Math.abs(y - currentRow.y) <= Math.max(1, height * 0.4)) {
         currentRow.text += item.str;
+        currentRow.x = Math.min(currentRow.x, x);
       } else {
-        rows.push({ text: item.str, y, height });
+        rows.push({ text: item.str, y, height, x });
       }
     }
 
     if (rows.length === 0) continue;
-    const lines: string[] = [];
-    rows.forEach((row, index) => {
-      if (index === 0) {
-        lines.push(row.text);
-        return;
-      }
-      const previous = rows[index - 1];
-      if (!previous) return;
-      const gap = Math.abs(row.y - previous.y);
-      const separator = gap > Math.max(row.height, previous.height) * 1.6 ? "\n\n" : "\n";
-      lines.push(`${separator}${row.text}`);
+    pages.push({
+      rows,
+      minX: Math.min(...rows.map((row) => row.x)),
+      longestLine: Math.max(...rows.map((row) => Array.from(row.text).length)),
     });
-    pageTexts.push(lines.join(""));
   }
 
-  const text = pageTexts.join("\n\n").trim();
+  const lines: string[] = [];
+  let previousRow: TextRow | undefined;
+  let previousPageIndex = -1;
+  for (let pageIndex = 0; pageIndex < pages.length; pageIndex += 1) {
+    const page = pages[pageIndex];
+    if (!page) continue;
+    for (const row of page.rows) {
+      if (!previousRow) {
+        lines.push(row.text);
+        previousRow = row;
+        previousPageIndex = pageIndex;
+        continue;
+      }
+
+      const previousPage = pages[previousPageIndex];
+      const samePage = pageIndex === previousPageIndex;
+      const gap = Math.abs(row.y - previousRow.y);
+      const largeVerticalGap = samePage && gap > Math.max(row.height, previousRow.height) * 1.6;
+      const indented = row.text.startsWith("　") || row.x >= page.minX + row.height * 0.8;
+      // 折り返しの行はほぼ行末まで埋まる。明らかに短い行（見出し・段落の最終行）の後ろは段落の区切り。
+      const previousIsShortSentence = !/[-‐‑]$/u.test(previousRow.text)
+        && Array.from(previousRow.text).length < (previousPage?.longestLine ?? 0) * 0.75;
+      // 見出しと本文のように文字の高さが変わる行は別の段落とみなす。
+      const fontSizeChanged = Math.abs(row.height - previousRow.height) > Math.max(row.height, previousRow.height) * 0.15;
+      const paragraphBreak = largeVerticalGap || indented || previousIsShortSentence || fontSizeChanged;
+      const hyphenatedWord = !paragraphBreak && /[-‐‑]$/u.test(previousRow.text) && /^[A-Za-z0-9]/u.test(row.text);
+      const adjacentHalfWidthAlphaNumeric = /[A-Za-z0-9]$/u.test(previousRow.text) && /^[A-Za-z0-9]/u.test(row.text);
+
+      if (paragraphBreak) {
+        lines.push(`\n${row.text}`);
+      } else if (hyphenatedWord) {
+        lines[lines.length - 1] = `${lines.at(-1)?.slice(0, -1) ?? ""}${row.text}`;
+      } else if (adjacentHalfWidthAlphaNumeric) {
+        lines.push(` ${row.text}`);
+      } else {
+        lines.push(row.text);
+      }
+      previousRow = row;
+      previousPageIndex = pageIndex;
+    }
+  }
+
+  const text = lines.join("").trim();
   await loadingTask.destroy();
   if (!text) throw new PdfImportError("テキストを抽出できません。スキャン画像PDFのOCRには対応していません。");
   return {

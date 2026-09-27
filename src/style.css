@@ -339,6 +339,7 @@ label:focus-within {
 .reading-stage {
   position: relative;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   min-height: 220px;
   flex: 1;
   place-items: center;
@@ -370,13 +371,15 @@ label:focus-within {
 }
 
 .current-chunk {
-  width: min(100%, 1100px);
-  overflow-wrap: anywhere;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
   color: var(--ink);
   font-family: "Hiragino Mincho ProN", "Yu Mincho", "Noto Serif JP", serif;
   font-size: var(--reader-size, 56px);
   line-height: 1.55;
   text-align: center;
+  white-space: nowrap;
 }
 
 .reader-footer {
@@ -558,10 +561,6 @@ label:focus-within {
   .reading-stage {
     min-height: 190px;
     padding: 20px 14px;
-  }
-
-  .current-chunk {
-    font-size: min(var(--reader-size, 56px), 15vw);
   }
 
   .reader-footer {

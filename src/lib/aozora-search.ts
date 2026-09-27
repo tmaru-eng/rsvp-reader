@@ -68,7 +68,7 @@ export async function fetchAozoraIndex(
 // 同じ作品が複数の文字遣いで収録されているとき、読みやすい新字新仮名を先に出す。
 const characterTypeOrder = ["新字新仮名", "新字旧仮名", "旧字新仮名", "旧字旧仮名"];
 
-function characterTypeRank(characterType: string): number {
+export function characterTypeRank(characterType: string): number {
   const index = characterTypeOrder.indexOf(characterType);
   return index === -1 ? characterTypeOrder.length : index;
 }

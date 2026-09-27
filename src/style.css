@@ -276,6 +276,90 @@ label:focus-within {
   margin-top: 28px;
 }
 
+.aozora-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.aozora-tab {
+  min-width: 0;
+  min-height: 46px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  color: #5e5b54;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.aozora-tab:hover {
+  border-color: #aaa69d;
+  background: #fffefa;
+}
+
+.aozora-tab.is-active {
+  border-color: var(--accent);
+  background: #f9eeec;
+  color: var(--accent-strong);
+}
+
+.aozora-panel {
+  min-width: 0;
+}
+
+.aozora-section .secondary-button {
+  min-height: 44px;
+}
+
+.aozora-kana-rows,
+.aozora-kana-stages {
+  display: flex;
+  gap: 6px;
+  padding: 2px 2px 5px;
+}
+
+.aozora-kana-rows {
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
+  -webkit-overflow-scrolling: touch;
+}
+
+.aozora-kana-stages {
+  min-height: 49px;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  margin-top: 3px;
+}
+
+.aozora-filter-button {
+  min-width: 48px;
+  min-height: 44px;
+  flex: 0 0 auto;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.aozora-filter-button:hover {
+  border-color: #aaa69d;
+  background: #fffefa;
+}
+
+.aozora-filter-button[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: #f9eeec;
+  color: var(--accent-strong);
+  font-weight: 650;
+}
+
 .aozora-search-label {
   display: block;
   margin: 0 0 7px;
@@ -305,6 +389,7 @@ label:focus-within {
   display: flex;
   width: 100%;
   min-width: 0;
+  min-height: 58px;
   flex-direction: column;
   align-items: flex-start;
   gap: 5px;
@@ -341,6 +426,59 @@ label:focus-within {
 .aozora-search-message {
   color: var(--muted);
   font-size: 12px;
+}
+
+.aozora-author {
+  display: flex;
+  width: 100%;
+  min-height: 52px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 13px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--panel);
+  cursor: pointer;
+  text-align: left;
+}
+
+.aozora-author:hover {
+  border-color: #aaa69d;
+  background: #fffefa;
+}
+
+.aozora-author-name {
+  overflow-wrap: anywhere;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.aozora-author-meta {
+  flex-shrink: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.aozora-author-books-heading {
+  display: flex;
+  min-height: 48px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 0 0 8px;
+}
+
+.aozora-author-books-heading h3 {
+  min-width: 0;
+  margin: 0;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+.aozora-more {
+  min-height: 44px;
+  margin-top: 9px;
 }
 
 .aozora-search-message {

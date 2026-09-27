@@ -1,6 +1,15 @@
 import "./style.css";
 import { fetchAozoraBook, type AozoraBook } from "./lib/aozora";
 import {
+  AOZORA_BROWSE_PAGE_SIZE,
+  AOZORA_BROWSE_ROWS,
+  getAozoraBrowseIndex,
+  getAozoraPage,
+  type AozoraBrowseAuthor,
+  type AozoraBrowseIndex,
+  type AozoraBrowseRowKey,
+} from "./lib/aozora-browse";
+import {
   AOZORA_INDEX_MISSING_MESSAGE,
   fetchAozoraIndex,
   searchAozoraIndex,
@@ -44,6 +53,15 @@ class ReaderApp {
   private aozoraIndex: AozoraIndexBook[] | null | undefined;
   private aozoraIndexLoad: Promise<AozoraIndexBook[] | null> | undefined;
   private aozoraSearchTimerId: number | undefined;
+  private aozoraBrowseIndex: AozoraBrowseIndex | undefined;
+  private aozoraTitleRow: AozoraBrowseRowKey | undefined;
+  private aozoraTitleStage: string | undefined;
+  private aozoraTitlePage = 0;
+  private aozoraAuthorRow: AozoraBrowseRowKey | undefined;
+  private aozoraAuthorStage: string | undefined;
+  private aozoraAuthorPage = 0;
+  private aozoraSelectedAuthor: AozoraBrowseAuthor | undefined;
+  private aozoraAuthorBookPage = 0;
 
   constructor(private readonly appRoot: HTMLElement) {
     this.settings = loadSettings();
@@ -102,9 +120,42 @@ class ReaderApp {
               <div class="library-heading">
                 <h2 id="aozora-title">青空文庫から読む</h2>
               </div>
-              <label class="aozora-search-label" for="aozora-search">作品名や作者名で検索</label>
-              <input class="aozora-search-input" id="aozora-search" type="search" placeholder="作品名・読み・作者名" autocomplete="off" aria-controls="aozora-list" />
-              <div class="aozora-grid" id="aozora-list" aria-live="polite"></div>
+              <div class="aozora-tabs" role="tablist" aria-label="青空文庫の探し方">
+                <button class="aozora-tab is-active" id="aozora-tab-search" type="button" role="tab" aria-selected="true" aria-controls="aozora-panel-search" data-aozora-tab="search">検索</button>
+                <button class="aozora-tab" id="aozora-tab-title" type="button" role="tab" aria-selected="false" aria-controls="aozora-panel-title" data-aozora-tab="title" tabindex="-1">作品名から</button>
+                <button class="aozora-tab" id="aozora-tab-author" type="button" role="tab" aria-selected="false" aria-controls="aozora-panel-author" data-aozora-tab="author" tabindex="-1">作者から</button>
+              </div>
+              <div class="aozora-panel" id="aozora-panel-search" role="tabpanel" aria-labelledby="aozora-tab-search">
+                <label class="aozora-search-label" for="aozora-search">作品名や作者名で検索</label>
+                <input class="aozora-search-input" id="aozora-search" type="search" placeholder="作品名・読み・作者名" autocomplete="off" aria-controls="aozora-list" />
+                <div class="aozora-grid" id="aozora-list" aria-live="polite"></div>
+              </div>
+              <div class="aozora-panel is-hidden" id="aozora-panel-title" role="tabpanel" aria-labelledby="aozora-tab-title">
+                <div class="aozora-kana-rows" id="aozora-title-rows" aria-label="作品名の行"></div>
+                <div class="aozora-kana-stages" id="aozora-title-stages" aria-label="作品名の段"></div>
+                <div class="aozora-grid" id="aozora-title-list" aria-live="polite">
+                  <p class="aozora-search-message">行を選んでください。</p>
+                </div>
+                <button class="secondary-button aozora-more is-hidden" id="aozora-title-more" type="button" data-aozora-more="titles">もっと見る</button>
+              </div>
+              <div class="aozora-panel is-hidden" id="aozora-panel-author" role="tabpanel" aria-labelledby="aozora-tab-author">
+                <div id="aozora-author-list-panel">
+                  <div class="aozora-kana-rows" id="aozora-author-rows" aria-label="作者の行"></div>
+                  <div class="aozora-kana-stages" id="aozora-author-stages" aria-label="作者の段"></div>
+                  <div class="aozora-grid" id="aozora-author-list" aria-live="polite">
+                    <p class="aozora-search-message">行を選んでください。</p>
+                  </div>
+                  <button class="secondary-button aozora-more is-hidden" id="aozora-author-more" type="button" data-aozora-more="authors">もっと見る</button>
+                </div>
+                <div class="is-hidden" id="aozora-author-books-panel">
+                  <div class="aozora-author-books-heading">
+                    <h3 id="aozora-author-books-title"></h3>
+                    <button class="secondary-button" type="button" data-aozora-author-back>作者一覧に戻る</button>
+                  </div>
+                  <div class="aozora-grid" id="aozora-author-books" aria-live="polite"></div>
+                  <button class="secondary-button aozora-more is-hidden" id="aozora-author-books-more" type="button" data-aozora-more="author-books">もっと見る</button>
+                </div>
+              </div>
               <small class="aozora-attribution">出典：青空文庫（aozorahack/aozorabunko_text の写し） · <a href="https://www.aozora.gr.jp/" target="_blank" rel="noopener noreferrer">青空文庫</a></small>
             </section>
 
@@ -248,12 +299,80 @@ class ReaderApp {
     const aozoraSearch = this.element<HTMLInputElement>("#aozora-search");
     aozoraSearch.addEventListener("focus", () => this.scheduleAozoraSearch());
     aozoraSearch.addEventListener("input", () => this.scheduleAozoraSearch());
-    this.element<HTMLDivElement>("#aozora-list").addEventListener("click", (event) => {
+    this.element<HTMLElement>(".aozora-section").addEventListener("click", (event) => {
       const target = event.target;
       if (!(target instanceof Element)) return;
+
+      const tab = target.closest<HTMLButtonElement>("[data-aozora-tab]");
+      if (tab) {
+        const selectedTab = tab.dataset.aozoraTab;
+        if (selectedTab === "search" || selectedTab === "title" || selectedTab === "author") {
+          this.selectAozoraTab(selectedTab);
+        }
+        return;
+      }
+
+      const rowButton = target.closest<HTMLButtonElement>("[data-aozora-browse-row]");
+      if (rowButton) {
+        const row = rowButton.dataset.aozoraBrowseRow as AozoraBrowseRowKey | undefined;
+        const mode = rowButton.dataset.aozoraBrowseMode;
+        if (row && mode === "titles") this.selectAozoraTitleRow(row);
+        if (row && mode === "authors") this.selectAozoraAuthorRow(row);
+        return;
+      }
+
+      const stageButton = target.closest<HTMLButtonElement>("[data-aozora-browse-stage]");
+      if (stageButton) {
+        const stage = stageButton.dataset.aozoraBrowseStage;
+        const mode = stageButton.dataset.aozoraBrowseMode;
+        if (mode === "titles") this.selectAozoraTitleStage(stage === "all" ? undefined : stage);
+        if (mode === "authors") this.selectAozoraAuthorStage(stage === "all" ? undefined : stage);
+        return;
+      }
+
       const button = target.closest<HTMLButtonElement>("[data-aozora-id]");
       const work = this.aozoraIndex?.find(({ id }) => id === button?.dataset.aozoraId);
-      if (work) void this.importAozora({ id: work.id, title: work.title, author: work.authors, path: work.path });
+      if (work) {
+        void this.importAozora({ id: work.id, title: work.title, author: work.authors, path: work.path });
+        return;
+      }
+
+      const authorButton = target.closest<HTMLButtonElement>("[data-aozora-author]");
+      if (authorButton?.dataset.aozoraAuthor) {
+        this.selectAozoraAuthor(authorButton.dataset.aozoraAuthor);
+        return;
+      }
+
+      const moreButton = target.closest<HTMLButtonElement>("[data-aozora-more]");
+      if (moreButton?.dataset.aozoraMore === "titles") this.appendAozoraTitlePage();
+      if (moreButton?.dataset.aozoraMore === "authors") this.appendAozoraAuthorPage();
+      if (moreButton?.dataset.aozoraMore === "author-books") this.appendAozoraAuthorBookPage();
+      if (target.closest("[data-aozora-author-back]")) {
+        this.aozoraSelectedAuthor = undefined;
+        this.renderAozoraAuthors();
+      }
+    });
+    this.element<HTMLDivElement>(".aozora-tabs").addEventListener("keydown", (event) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      const current = target.closest<HTMLButtonElement>("[data-aozora-tab]");
+      const currentTab = current?.dataset.aozoraTab;
+      if (!current || (currentTab !== "search" && currentTab !== "title" && currentTab !== "author")) return;
+
+      const tabs = ["search", "title", "author"] as const;
+      const currentIndex = tabs.indexOf(currentTab);
+      const nextIndex = event.key === "ArrowRight" ? (currentIndex + 1) % tabs.length
+        : event.key === "ArrowLeft" ? (currentIndex + tabs.length - 1) % tabs.length
+          : event.key === "Home" ? 0
+            : event.key === "End" ? tabs.length - 1
+              : -1;
+      if (nextIndex < 0) return;
+
+      event.preventDefault();
+      const nextTab = tabs[nextIndex];
+      const nextButton = this.element<HTMLButtonElement>(`#aozora-tab-${nextTab}`);
+      nextButton.focus();
+      this.selectAozoraTab(nextTab);
     });
     this.element<HTMLButtonElement>("#change-book").addEventListener("click", () => this.showLibrary());
     this.element<HTMLButtonElement>("#go-to-start").addEventListener("click", () => this.goToStart());
@@ -460,6 +579,7 @@ class ReaderApp {
     const loading = fetchAozoraIndex(fetch, `${import.meta.env.BASE_URL}aozora-index.json`)
       .then((index) => {
         this.aozoraIndex = index;
+        this.aozoraBrowseIndex = index ? getAozoraBrowseIndex(index) : undefined;
         if (!index) this.renderAozoraMessage(AOZORA_INDEX_MISSING_MESSAGE);
         return index;
       })
@@ -505,30 +625,268 @@ class ReaderApp {
     }
 
     const fragment = document.createDocumentFragment();
-    for (const work of results) {
-      const button = document.createElement("button");
-      button.className = "aozora-book";
-      button.type = "button";
-      button.dataset.aozoraId = work.id;
-      button.setAttribute("aria-label", `${work.title}（${work.authors}）を読む`);
+    for (const work of results) fragment.append(this.createAozoraBookButton(work));
+    this.element<HTMLDivElement>("#aozora-list").replaceChildren(fragment);
+  }
 
-      const title = document.createElement("span");
-      title.className = "aozora-book-title";
-      title.textContent = work.title;
-      button.append(title);
-      if (work.subtitle) {
-        const subtitle = document.createElement("span");
-        subtitle.className = "aozora-book-subtitle";
-        subtitle.textContent = work.subtitle;
-        button.append(subtitle);
+  private createAozoraBookButton(work: AozoraIndexBook): HTMLButtonElement {
+    const button = document.createElement("button");
+    button.className = "aozora-book";
+    button.type = "button";
+    button.dataset.aozoraId = work.id;
+    button.setAttribute("aria-label", `${work.title}（${work.authors}）を読む`);
+
+    const title = document.createElement("span");
+    title.className = "aozora-book-title";
+    title.textContent = work.title;
+    button.append(title);
+    if (work.subtitle) {
+      const subtitle = document.createElement("span");
+      subtitle.className = "aozora-book-subtitle";
+      subtitle.textContent = work.subtitle;
+      button.append(subtitle);
+    }
+    const details = document.createElement("span");
+    details.className = "aozora-book-meta";
+    details.textContent = [work.authors, work.characterType].filter(Boolean).join(" · ");
+    button.append(details);
+    return button;
+  }
+
+  private selectAozoraTab(tab: "search" | "title" | "author"): void {
+    for (const name of ["search", "title", "author"] as const) {
+      const isSelected = name === tab;
+      const tabButton = this.element<HTMLButtonElement>(`#aozora-tab-${name}`);
+      tabButton.classList.toggle("is-active", isSelected);
+      tabButton.setAttribute("aria-selected", String(isSelected));
+      tabButton.tabIndex = isSelected ? 0 : -1;
+      this.element<HTMLElement>(`#aozora-panel-${name}`).classList.toggle("is-hidden", !isSelected);
+    }
+
+    if (tab === "search") {
+      this.scheduleAozoraSearch();
+      return;
+    }
+
+    const listSelector = tab === "title" ? "#aozora-title-list" : "#aozora-author-list";
+    this.renderAozoraBrowseMessage(listSelector, "検索データを読み込んでいます…");
+    void this.loadAozoraIndex().then((index) => {
+      if (!index) {
+        this.renderAozoraBrowseMessage(listSelector, AOZORA_INDEX_MISSING_MESSAGE);
+      } else if (tab === "title") {
+        this.renderAozoraTitles();
+      } else {
+        this.renderAozoraAuthors();
       }
-      const details = document.createElement("span");
-      details.className = "aozora-book-meta";
-      details.textContent = [work.authors, work.characterType].filter(Boolean).join(" · ");
-      button.append(details);
+    });
+  }
+
+  private renderAozoraBrowseMessage(selector: string, message: string): void {
+    const status = document.createElement("p");
+    status.className = "aozora-search-message";
+    status.textContent = message;
+    this.element<HTMLDivElement>(selector).replaceChildren(status);
+  }
+
+  private renderAozoraKanaFilters(
+    mode: "titles" | "authors",
+    rowsSelector: string,
+    stagesSelector: string,
+    selectedRow: AozoraBrowseRowKey | undefined,
+    selectedStage: string | undefined,
+  ): void {
+    const rows = this.element<HTMLDivElement>(rowsSelector);
+    const rowFragment = document.createDocumentFragment();
+    for (const row of AOZORA_BROWSE_ROWS) {
+      const button = document.createElement("button");
+      button.className = "aozora-filter-button";
+      button.type = "button";
+      button.dataset.aozoraBrowseMode = mode;
+      button.dataset.aozoraBrowseRow = row.key;
+      button.setAttribute("aria-pressed", String(selectedRow === row.key));
+      button.textContent = row.label;
+      rowFragment.append(button);
+    }
+    rows.replaceChildren(rowFragment);
+
+    const stages = this.element<HTMLDivElement>(stagesSelector);
+    stages.replaceChildren();
+    const row = AOZORA_BROWSE_ROWS.find(({ key }) => key === selectedRow);
+    if (!row || row.key === "その他") {
+      stages.classList.add("is-hidden");
+      return;
+    }
+    stages.classList.remove("is-hidden");
+
+    const stageFragment = document.createDocumentFragment();
+    const allButton = document.createElement("button");
+    allButton.className = "aozora-filter-button";
+    allButton.type = "button";
+    allButton.dataset.aozoraBrowseMode = mode;
+    allButton.dataset.aozoraBrowseStage = "all";
+    allButton.setAttribute("aria-pressed", String(selectedStage === undefined));
+    allButton.textContent = "すべて";
+    stageFragment.append(allButton);
+
+    for (const stage of row.stages) {
+      const button = document.createElement("button");
+      button.className = "aozora-filter-button";
+      button.type = "button";
+      button.dataset.aozoraBrowseMode = mode;
+      button.dataset.aozoraBrowseStage = stage;
+      button.setAttribute("aria-pressed", String(selectedStage === stage));
+      button.textContent = stage;
+      stageFragment.append(button);
+    }
+    stages.replaceChildren(stageFragment);
+  }
+
+  private selectAozoraTitleRow(row: AozoraBrowseRowKey): void {
+    this.aozoraTitleRow = row;
+    this.aozoraTitleStage = undefined;
+    this.renderAozoraTitles();
+  }
+
+  private selectAozoraTitleStage(stage: string | undefined): void {
+    this.aozoraTitleStage = stage;
+    this.renderAozoraTitles();
+  }
+
+  private getAozoraTitleItems(): readonly AozoraIndexBook[] | undefined {
+    if (!this.aozoraBrowseIndex || !this.aozoraTitleRow) return undefined;
+    if (!this.aozoraTitleStage) return this.aozoraBrowseIndex.booksByRow.get(this.aozoraTitleRow) ?? [];
+    return this.aozoraBrowseIndex.booksByRowStage.get(this.aozoraTitleRow)?.get(this.aozoraTitleStage) ?? [];
+  }
+
+  private renderAozoraTitles(): void {
+    this.renderAozoraKanaFilters("titles", "#aozora-title-rows", "#aozora-title-stages", this.aozoraTitleRow, this.aozoraTitleStage);
+    const list = this.element<HTMLDivElement>("#aozora-title-list");
+    list.replaceChildren();
+    this.aozoraTitlePage = 0;
+    const items = this.getAozoraTitleItems();
+    if (!items) {
+      this.renderAozoraBrowseMessage("#aozora-title-list", "行を選んでください。");
+      this.element<HTMLButtonElement>("#aozora-title-more").classList.add("is-hidden");
+      return;
+    }
+    if (items.length === 0) {
+      this.renderAozoraBrowseMessage("#aozora-title-list", "この行に作品はありません。");
+      this.element<HTMLButtonElement>("#aozora-title-more").classList.add("is-hidden");
+      return;
+    }
+    this.appendAozoraTitlePage();
+  }
+
+  private appendAozoraTitlePage(): void {
+    const items = this.getAozoraTitleItems();
+    if (!items) return;
+    const page = getAozoraPage(items, this.aozoraTitlePage);
+    if (page.length === 0) return;
+    const fragment = document.createDocumentFragment();
+    for (const work of page) fragment.append(this.createAozoraBookButton(work));
+    this.element<HTMLDivElement>("#aozora-title-list").append(fragment);
+    this.aozoraTitlePage += 1;
+    this.updateAozoraMoreButton("#aozora-title-more", items.length, this.aozoraTitlePage);
+  }
+
+  private selectAozoraAuthorRow(row: AozoraBrowseRowKey): void {
+    this.aozoraAuthorRow = row;
+    this.aozoraAuthorStage = undefined;
+    this.aozoraSelectedAuthor = undefined;
+    this.renderAozoraAuthors();
+  }
+
+  private selectAozoraAuthorStage(stage: string | undefined): void {
+    this.aozoraAuthorStage = stage;
+    this.aozoraSelectedAuthor = undefined;
+    this.renderAozoraAuthors();
+  }
+
+  private getAozoraAuthorItems(): readonly AozoraBrowseAuthor[] | undefined {
+    if (!this.aozoraBrowseIndex || !this.aozoraAuthorRow) return undefined;
+    if (!this.aozoraAuthorStage) return this.aozoraBrowseIndex.authorsByRow.get(this.aozoraAuthorRow) ?? [];
+    return this.aozoraBrowseIndex.authorsByRowStage.get(this.aozoraAuthorRow)?.get(this.aozoraAuthorStage) ?? [];
+  }
+
+  private renderAozoraAuthors(): void {
+    this.renderAozoraKanaFilters("authors", "#aozora-author-rows", "#aozora-author-stages", this.aozoraAuthorRow, this.aozoraAuthorStage);
+    const listPanel = this.element<HTMLDivElement>("#aozora-author-list-panel");
+    const booksPanel = this.element<HTMLDivElement>("#aozora-author-books-panel");
+    if (this.aozoraSelectedAuthor) {
+      listPanel.classList.add("is-hidden");
+      booksPanel.classList.remove("is-hidden");
+      this.element<HTMLHeadingElement>("#aozora-author-books-title").textContent = `${this.aozoraSelectedAuthor.name}（${this.aozoraSelectedAuthor.books.length}作品）`;
+      this.element<HTMLDivElement>("#aozora-author-books").replaceChildren();
+      this.aozoraAuthorBookPage = 0;
+      this.appendAozoraAuthorBookPage();
+      return;
+    }
+
+    listPanel.classList.remove("is-hidden");
+    booksPanel.classList.add("is-hidden");
+    this.element<HTMLDivElement>("#aozora-author-list").replaceChildren();
+    this.aozoraAuthorPage = 0;
+    const authors = this.getAozoraAuthorItems();
+    if (!authors) {
+      this.renderAozoraBrowseMessage("#aozora-author-list", "行を選んでください。");
+      this.element<HTMLButtonElement>("#aozora-author-more").classList.add("is-hidden");
+      return;
+    }
+    if (authors.length === 0) {
+      this.renderAozoraBrowseMessage("#aozora-author-list", "この行に作者はいません。");
+      this.element<HTMLButtonElement>("#aozora-author-more").classList.add("is-hidden");
+      return;
+    }
+    this.appendAozoraAuthorPage();
+  }
+
+  private appendAozoraAuthorPage(): void {
+    const authors = this.getAozoraAuthorItems();
+    if (!authors) return;
+    const page = getAozoraPage(authors, this.aozoraAuthorPage);
+    if (page.length === 0) return;
+    const fragment = document.createDocumentFragment();
+    for (const author of page) {
+      const button = document.createElement("button");
+      button.className = "aozora-author";
+      button.type = "button";
+      button.dataset.aozoraAuthor = author.name;
+      const name = document.createElement("span");
+      name.className = "aozora-author-name";
+      name.textContent = author.name;
+      const count = document.createElement("span");
+      count.className = "aozora-author-meta";
+      count.textContent = `${author.books.length}作品`;
+      button.append(name, count);
       fragment.append(button);
     }
-    this.element<HTMLDivElement>("#aozora-list").replaceChildren(fragment);
+    this.element<HTMLDivElement>("#aozora-author-list").append(fragment);
+    this.aozoraAuthorPage += 1;
+    this.updateAozoraMoreButton("#aozora-author-more", authors.length, this.aozoraAuthorPage);
+  }
+
+  private selectAozoraAuthor(name: string): void {
+    const author = this.aozoraBrowseIndex?.authors.find((item) => item.name === name);
+    if (!author) return;
+    this.aozoraSelectedAuthor = author;
+    this.aozoraAuthorBookPage = 0;
+    this.renderAozoraAuthors();
+  }
+
+  private appendAozoraAuthorBookPage(): void {
+    const books = this.aozoraSelectedAuthor?.books;
+    if (!books) return;
+    const page = getAozoraPage(books, this.aozoraAuthorBookPage);
+    if (page.length === 0) return;
+    const fragment = document.createDocumentFragment();
+    for (const work of page) fragment.append(this.createAozoraBookButton(work));
+    this.element<HTMLDivElement>("#aozora-author-books").append(fragment);
+    this.aozoraAuthorBookPage += 1;
+    this.updateAozoraMoreButton("#aozora-author-books-more", books.length, this.aozoraAuthorBookPage);
+  }
+
+  private updateAozoraMoreButton(selector: string, total: number, nextPage: number): void {
+    this.element<HTMLButtonElement>(selector).classList.toggle("is-hidden", nextPage * AOZORA_BROWSE_PAGE_SIZE >= total);
   }
 
   private async importAozora(work: AozoraBook): Promise<void> {

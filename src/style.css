@@ -272,6 +272,61 @@ label:focus-within {
   margin-top: 32px;
 }
 
+.aozora-section {
+  margin-top: 28px;
+}
+
+.aozora-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr));
+  gap: 8px;
+}
+
+.aozora-book {
+  display: grid;
+  min-width: 0;
+  min-height: 72px;
+  align-content: center;
+  gap: 5px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--panel);
+  cursor: pointer;
+  text-align: left;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+
+.aozora-book:hover {
+  border-color: #aaa69d;
+  background: #fffefa;
+}
+
+.aozora-book-title {
+  overflow-wrap: anywhere;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.aozora-book-author {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.aozora-attribution {
+  display: block;
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.aozora-attribution a {
+  color: inherit;
+  text-underline-offset: 2px;
+}
+
 .library-heading {
   justify-content: space-between;
   margin-bottom: 11px;

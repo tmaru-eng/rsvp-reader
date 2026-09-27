@@ -1,6 +1,7 @@
 import "./style.css";
+import { AOZORA_BOOKS, fetchAozoraBook } from "./lib/aozora";
 import { buildChunks, type ChunkOptions } from "./lib/chunking";
-import { parseEpub } from "./lib/epub";
+import { isEpubFilename, parseEpub } from "./lib/epub";
 import { DEFAULT_SETTINGS, loadSettings, saveSettings, type ReaderSettings } from "./lib/settings";
 import { createBookRepository, sha256Text, type BookRepository } from "./lib/storage";
 import { parseTextDocument } from "./lib/text";
@@ -63,10 +64,10 @@ class ReaderApp {
                 <div>
                   <p>ファイルをここにドロップ</p>
                   <label class="file-button" for="file-input">ファイルを選ぶ</label>
-                  <small>TXT・PDF・EPUBに対応</small>
+                  <small>TXT・PDF・EPUB・KEPUBに対応</small>
                 </div>
               </div>
-              <input class="file-input" id="file-input" type="file" accept=".txt,.pdf,.epub,text/plain,application/pdf,application/epub+zip" />
+              <input class="file-input" id="file-input" type="file" accept=".txt,.pdf,.epub,.kepub,.kepub.epub,text/plain,application/pdf,application/epub+zip" />
 
               <label class="paste-label" for="paste-area">
                 または文章を貼り付け
@@ -77,6 +78,14 @@ class ReaderApp {
                 <span class="privacy-note">選んだファイルと文章はこのブラウザ内で処理します。</span>
               </div>
             </div>
+
+            <section class="aozora-section" aria-labelledby="aozora-title">
+              <div class="library-heading">
+                <h2 id="aozora-title">青空文庫から読む</h2>
+              </div>
+              <div class="aozora-grid" id="aozora-list"></div>
+              <small class="aozora-attribution">出典：青空文庫（aozorahack/aozorabunko_text の写し） · <a href="https://www.aozora.gr.jp/" target="_blank" rel="noopener noreferrer">青空文庫</a></small>
+            </section>
 
             <section class="recent-section" aria-labelledby="recent-title">
               <div class="library-heading">
@@ -187,6 +196,29 @@ class ReaderApp {
         </main>
       </div>
     `;
+    this.renderAozoraBooks();
+  }
+
+  private renderAozoraBooks(): void {
+    const list = this.element<HTMLDivElement>("#aozora-list");
+    const fragment = document.createDocumentFragment();
+    for (const work of AOZORA_BOOKS) {
+      const button = document.createElement("button");
+      button.className = "aozora-book";
+      button.type = "button";
+      button.dataset.aozoraId = work.id;
+      button.setAttribute("aria-label", `${work.title}（${work.author}）を読む`);
+
+      const title = document.createElement("span");
+      title.className = "aozora-book-title";
+      title.textContent = work.title;
+      const author = document.createElement("span");
+      author.className = "aozora-book-author";
+      author.textContent = work.author;
+      button.append(title, author);
+      fragment.append(button);
+    }
+    list.replaceChildren(fragment);
   }
 
   private bindEvents(): void {
@@ -201,6 +233,13 @@ class ReaderApp {
         return;
       }
       void this.importParsed(parseTextDocument(text, "貼り付け.txt"));
+    });
+    this.element<HTMLDivElement>("#aozora-list").addEventListener("click", (event) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      const button = target.closest<HTMLButtonElement>("[data-aozora-id]");
+      const work = AOZORA_BOOKS.find(({ id }) => id === button?.dataset.aozoraId);
+      if (work) void this.importAozora(work);
     });
     this.element<HTMLButtonElement>("#change-book").addEventListener("click", () => this.showLibrary());
     this.element<HTMLButtonElement>("#go-to-start").addEventListener("click", () => this.goToStart());
@@ -351,13 +390,14 @@ class ReaderApp {
         ]);
         pdfjs.GlobalWorkerOptions.workerSrc = workerModule.default;
         parsed = await pdfModule.parsePdf(bytes, `${import.meta.env.BASE_URL}cmaps/`, {}, filename);
-      } else if (extension === "epub") {
+      } else if (isEpubFilename(filename)) {
         parsed = await parseEpub(bytes);
       } else {
-        throw new Error("TXT・PDF・EPUBファイルを選んでください。");
+        throw new Error("TXT・PDF・EPUB・KEPUBファイルを選んでください。");
       }
       await this.openBook(parsed);
     } catch (error) {
+      if (isStaleModuleError(error) && reloadForUpdate()) return;
       this.showError(error instanceof Error ? error.message : "ファイルを読み込めませんでした。");
     } finally {
       this.hideLoading();
@@ -371,6 +411,19 @@ class ReaderApp {
       await this.openBook(parsed);
     } catch (error) {
       this.showError(error instanceof Error ? error.message : "文章を読み込めませんでした。");
+    } finally {
+      this.hideLoading();
+    }
+  }
+
+  private async importAozora(work: (typeof AOZORA_BOOKS)[number]): Promise<void> {
+    this.showLoading(`「${work.title}」を青空文庫から読み込んでいます…`);
+    this.clearError();
+    try {
+      await this.openBook(await fetchAozoraBook(work));
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "通信状態を確認してください。";
+      this.showError(`「${work.title}」を読み込めませんでした。${detail}`);
     } finally {
       this.hideLoading();
     }
@@ -805,5 +858,40 @@ class ReaderApp {
 interface WakeLock {
   request(type: "screen"): Promise<WakeLockSentinel>;
 }
+
+// 新しい版を公開すると、開いたままの古いページが参照する分割ファイルは消える。
+// そのとき Safari は "Importing a module script failed." で失敗するので、1回だけ読み込み直す。
+const UPDATE_RELOAD_KEY = "rsvp-reader.reloaded-for-update";
+const staleModulePattern = /Importing a module script failed|Failed to fetch dynamically imported module|error loading dynamically imported module|Unable to preload CSS/iu;
+
+function reloadForUpdate(): boolean {
+  try {
+    if (sessionStorage.getItem(UPDATE_RELOAD_KEY)) return false;
+    sessionStorage.setItem(UPDATE_RELOAD_KEY, String(Date.now()));
+  } catch {
+    return false;
+  }
+  window.location.reload();
+  return true;
+}
+
+export function isStaleModuleError(error: unknown): boolean {
+  return error instanceof Error && staleModulePattern.test(error.message);
+}
+
+window.addEventListener("vite:preloadError", (event) => {
+  if (reloadForUpdate()) event.preventDefault();
+});
+window.addEventListener("unhandledrejection", (event) => {
+  if (isStaleModuleError(event.reason)) reloadForUpdate();
+});
+// 正常に動き続けたら、次の更新でも再び自動で読み込み直せるよう印を消す。
+window.setTimeout(() => {
+  try {
+    sessionStorage.removeItem(UPDATE_RELOAD_KEY);
+  } catch {
+    // sessionStorage が使えない環境では何もしない。
+  }
+}, 10_000);
 
 new ReaderApp(root);

@@ -8,6 +8,17 @@ export class EpubImportError extends Error {
   }
 }
 
+const FONT_OBFUSCATION_ALGORITHMS = new Set([
+  "http://www.idpf.org/2008/embedding",
+  "http://ns.adobe.com/pdf/enc#RC",
+]);
+const FONT_FILE_EXTENSION = /\.(?:otf|otc|ttf|ttc|woff2?|sfnt)$/iu;
+const FONT_MEDIA_TYPE = /(?:font|woff|opentype|sfnt)/iu;
+
+export function isEpubFilename(filename: string): boolean {
+  return /\.(?:epub|kepub)$/iu.test(filename);
+}
+
 function elements(root: Document | Element): Element[] {
   return Array.from(root.getElementsByTagName("*"));
 }
@@ -65,9 +76,6 @@ function removeElements(document: Document, names: ReadonlySet<string>): void {
 
 export async function parseEpub(input: ArrayBuffer | Uint8Array): Promise<ParsedBook> {
   const zip = await JSZip.loadAsync(input);
-  if (zip.file("META-INF/encryption.xml")) {
-    throw new EpubImportError("DRM付きのEPUBは読めません。");
-  }
 
   const containerFile = zip.file("META-INF/container.xml");
   if (!containerFile) throw new EpubImportError("EPUBの目次情報が見つかりません。");
@@ -82,12 +90,19 @@ export async function parseEpub(input: ArrayBuffer | Uint8Array): Promise<Parsed
   const title = firstByLocalName(opf, "title")?.textContent?.trim() || "タイトル不明";
   const author = firstByLocalName(opf, "creator")?.textContent?.trim() || "";
   const manifest = new Map<string, string>();
+  const fontPaths = new Set<string>();
   const manifestElement = firstByLocalName(opf, "manifest");
   if (manifestElement) {
     for (const item of elements(manifestElement).filter((element) => localName(element) === "item")) {
       const id = item.getAttribute("id");
       const href = item.getAttribute("href");
-      if (id && href) manifest.set(id, href);
+      if (id && href) {
+        manifest.set(id, href);
+        const mediaType = item.getAttribute("media-type") ?? "";
+        if (FONT_MEDIA_TYPE.test(mediaType) || FONT_FILE_EXTENSION.test(href)) {
+          fontPaths.add(resolveArchivePath(opfPath, href));
+        }
+      }
     }
   }
 
@@ -99,6 +114,28 @@ export async function parseEpub(input: ArrayBuffer | Uint8Array): Promise<Parsed
     .filter((href): href is string => Boolean(href))
     .map((href) => resolveArchivePath(opfPath, href));
   if (chapterPaths.length === 0) throw new EpubImportError("EPUBに本文の章がありません。");
+
+  const encryptionFile = zip.file("META-INF/encryption.xml");
+  if (encryptionFile) {
+    const encryption = parseXml(await encryptionFile.async("text"));
+    const spinePaths = new Set(chapterPaths);
+    const encryptedData = elements(encryption).filter((element) => localName(element) === "encrypteddata");
+    for (const entry of encryptedData) {
+      const algorithm = elements(entry)
+        .find((element) => localName(element) === "encryptionmethod")
+        ?.getAttribute("Algorithm") ?? "";
+      const uri = elements(entry)
+        .find((element) => localName(element) === "cipherreference")
+        ?.getAttribute("URI");
+      if (!uri) continue;
+
+      const resourcePath = resolveArchivePath("", uri);
+      if (spinePaths.has(resourcePath)) {
+        throw new EpubImportError("DRM で保護されているため読めません");
+      }
+      if (FONT_OBFUSCATION_ALGORITHMS.has(algorithm) && fontPaths.has(resourcePath)) continue;
+    }
+  }
 
   const paragraphs: string[] = [];
   for (const chapterPath of chapterPaths) {

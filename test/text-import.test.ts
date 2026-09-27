@@ -3,13 +3,31 @@ import { resolve, sep } from "node:path";
 import { DOMParser } from "@xmldom/xmldom";
 import JSZip from "jszip";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { parseEpub } from "../src/lib/epub";
+import { isEpubFilename, parseEpub } from "../src/lib/epub";
 import { parsePdf } from "../src/lib/pdf";
 import { parseTextDocument } from "../src/lib/text";
 
 const aozoraFixture = new URL("./fixtures/kumo-no-ito-sjis.txt", import.meta.url);
 const pdfFixture = new URL("./fixtures/japanese-text.pdf", import.meta.url);
 const epubFixture = new URL("./fixtures/ruby-book.epub", import.meta.url);
+
+const IDPF_FONT_OBFUSCATION = "http://www.idpf.org/2008/embedding";
+const ADOBE_FONT_OBFUSCATION = "http://ns.adobe.com/pdf/enc#RC";
+
+function encryptedItem(algorithm: string, uri: string): string {
+  return `<EncryptedData xmlns="http://www.w3.org/2001/04/xmlenc#"><EncryptionMethod Algorithm="${algorithm}"/><CipherData><CipherReference URI="${uri}"/></CipherData></EncryptedData>`;
+}
+
+async function makeEpub(encryptionXml = "", chapterContent = "<p>本文の段落です。</p>"): Promise<Uint8Array> {
+  const zip = new JSZip();
+  zip.file("META-INF/container.xml", '<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OPS/book.opf" media-type="application/oebps-package+xml"/></rootfiles></container>');
+  zip.file("OPS/book.opf", '<package xmlns="http://www.idpf.org/2007/opf" version="3.0"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>Fixture</dc:title><dc:creator>著者</dc:creator></metadata><manifest><item id="chapter" href="chapter.xhtml" media-type="application/xhtml+xml"/><item id="font-otf" href="fonts/font.otf" media-type="font/otf"/><item id="font-ttf" href="fonts/font.ttf" media-type="font/ttf"/></manifest><spine><itemref idref="chapter"/></spine></package>');
+  zip.file("OPS/chapter.xhtml", `<?xml version="1.0" encoding="UTF-8"?><html xmlns="http://www.w3.org/1999/xhtml"><head><title>Fixture</title></head><body>${chapterContent}</body></html>`);
+  zip.file("OPS/fonts/font.otf", new Uint8Array([1]));
+  zip.file("OPS/fonts/font.ttf", new Uint8Array([2]));
+  if (encryptionXml) zip.file("META-INF/encryption.xml", encryptionXml);
+  return zip.generateAsync({ type: "uint8array" });
+}
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -49,14 +67,29 @@ describe("EPUB documents", () => {
     expect(book.text).not.toContain("（");
   });
 
-  it("rejects EPUB archives that declare DRM encryption", async () => {
+  it("reads EPUBs when encryption only obfuscates embedded fonts", async () => {
     vi.stubGlobal("DOMParser", DOMParser);
-    const zip = new JSZip();
-    zip.file("META-INF/container.xml", "<container />");
-    zip.file("META-INF/encryption.xml", "<encryption />");
-    const bytes = await zip.generateAsync({ type: "uint8array" });
+    const encryption = `<encryption>${encryptedItem(IDPF_FONT_OBFUSCATION, "OPS/fonts/font.otf")}${encryptedItem(ADOBE_FONT_OBFUSCATION, "OPS/fonts/font.ttf")}</encryption>`;
+    const book = await parseEpub(await makeEpub(encryption));
 
-    await expect(parseEpub(bytes)).rejects.toThrow("DRM付きのEPUBは読めません");
+    expect(book.text).toBe("本文の段落です。");
+  });
+
+  it("rejects EPUBs when a spine XHTML document is encrypted", async () => {
+    vi.stubGlobal("DOMParser", DOMParser);
+    const encryption = `<encryption>${encryptedItem(IDPF_FONT_OBFUSCATION, "OPS/chapter.xhtml")}</encryption>`;
+
+    await expect(parseEpub(await makeEpub(encryption))).rejects.toThrow("DRM で保護されているため読めません");
+  });
+
+  it("extracts text from kepub files with Kobo span wrappers", async () => {
+    vi.stubGlobal("DOMParser", DOMParser);
+    const bytes = await makeEpub("", '<p><span class="koboSpan">蜘蛛の</span><span class="koboSpan">糸</span>が、地獄へ垂れています。</p>');
+    const book = await parseEpub(bytes);
+
+    expect(isEpubFilename("book.kepub")).toBe(true);
+    expect(isEpubFilename("book.kepub.epub")).toBe(true);
+    expect(book.text).toBe("蜘蛛の糸が、地獄へ垂れています。");
   });
 });
 

@@ -591,11 +591,12 @@ label:focus-within {
 }
 
 .reading-stage.guides-on::before {
-  top: calc(50% - 58px);
+  /* ルビ（本文の 0.45 倍の文字が上に乗る）と重ならないよう、文字サイズに合わせて離す。 */
+  top: calc(50% - var(--reader-size, 56px) * 1.1 - 16px);
 }
 
 .reading-stage.guides-on::after {
-  bottom: calc(50% - 58px);
+  bottom: calc(50% - var(--reader-size, 56px) * 1.1 - 16px);
 }
 
 .current-chunk {

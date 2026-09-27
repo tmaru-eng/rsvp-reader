@@ -72,4 +72,16 @@ describe("PDF documents", () => {
     expect(book.text).toBe("日本語PDF抽出テスト\n蜘蛛の糸は、極楽の蓮池から地獄へ垂れています。芥川龍之介の作品です。");
     expect(book.text).not.toContain(" ");
   });
+
+  it("reads vertical Japanese PDFs column by column and normalizes radical and vertical-form characters", async () => {
+    const bytes = new Uint8Array(await readFile(resolve(process.cwd(), "test/fixtures/vertical-japanese.pdf")));
+    const cMapUrl = `${resolve(process.cwd(), "public/cmaps")}${sep}`;
+    const book = await parsePdf(bytes, cMapUrl, { disableFontFace: true });
+
+    expect(book.text.startsWith("ある日の事でございます。御釈迦様は極楽の蓮池のふちを、")).toBe(true);
+    expect(book.text).toContain("\nやがて御釈迦様は");
+    expect(book.text.split("\n")).toHaveLength(2);
+    expect(book.text).not.toMatch(/[\u2E80-\u2FDF\uFE10-\uFE1F\uFE30-\uFE4F]/u);
+    expect(book.warning).toBeDefined();
+  });
 });

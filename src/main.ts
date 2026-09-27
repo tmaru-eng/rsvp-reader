@@ -11,6 +11,7 @@ import {
 } from "./lib/aozora-browse";
 import {
   AOZORA_INDEX_MISSING_MESSAGE,
+  characterTypeRank,
   fetchAozoraIndex,
   searchAozoraIndex,
   type AozoraIndexBook,
@@ -913,18 +914,54 @@ class ReaderApp {
       text: parsed.text,
       rubies: parsed.rubies ?? previous?.rubies ?? [],
       position: previous?.position ?? 0,
+      charPosition: previous?.charPosition,
+      rubySupport: true,
       lastViewedAt: Date.now(),
       format: parsed.format,
       totalChars: Array.from(parsed.text).length,
     };
     this.currentBook = record;
     this.chunks = buildChunks(record.text, this.chunkOptions(Number.MAX_SAFE_INTEGER), undefined, record.rubies);
-    this.currentIndex = this.clampIndex(record.position);
+    this.currentIndex = this.resumeIndex(record);
     this.currentBook.position = this.currentIndex;
     this.showReader(parsed.warning);
     this.rebuildChunks();
     await this.repository?.save(this.currentBook);
     await this.refreshRecentBooks();
+  }
+
+  /** 保存した文字位置から、今の区切りでの番号を求める。文字位置のない古いレコードは区切りの番号をそのまま使う。 */
+  private resumeIndex(record: Pick<BookRecord, "position" | "charPosition">): number {
+    if (record.charPosition === undefined) return this.clampIndex(record.position);
+    let index = 0;
+    for (let candidate = 0; candidate < this.chunks.length; candidate += 1) {
+      if ((this.chunks[candidate]?.charStart ?? Number.POSITIVE_INFINITY) > record.charPosition) break;
+      index = candidate;
+    }
+    return index;
+  }
+
+  private async upgradeAozoraRecord(saved: BookRecord): Promise<boolean> {
+    try {
+      const index = await this.loadAozoraIndex();
+      if (!index) return false;
+      const normalize = (value: string) => value.normalize("NFKC").replace(/\s+/gu, "");
+      const title = normalize(saved.title);
+      const author = normalize(saved.author);
+      const candidates = index
+        .filter((book) => normalize(book.title) === title && (!author || normalize(book.authors).includes(author) || author.includes(normalize(book.authors))))
+        .sort((left, right) => characterTypeRank(left.characterType) - characterTypeRank(right.characterType))
+        .slice(0, 4);
+      for (const candidate of candidates) {
+        const parsed = await fetchAozoraBook({ id: candidate.id, title: candidate.title, author: candidate.authors, path: candidate.path });
+        if (await sha256Text(parsed.text) !== saved.id) continue;
+        await this.openBook(parsed);
+        return true;
+      }
+    } catch {
+      // 取り直せなくても、保存済みの本文でそのまま開く。
+    }
+    return false;
   }
 
   private async openRecentBook(id: string): Promise<void> {
@@ -937,9 +974,11 @@ class ReaderApp {
     try {
       const saved = await this.repository.get(id);
       if (!saved) throw new Error("この本のしおりが見つかりません。");
+      // ルビ対応前に保存した青空文庫の本は、本文を取り直してルビを付ける（本文が同じなら続きの位置も保たれる）。
+      if (!saved.rubySupport && saved.format === "txt" && await this.upgradeAozoraRecord(saved)) return;
       this.currentBook = { ...saved, lastViewedAt: Date.now() };
       this.chunks = buildChunks(saved.text, this.chunkOptions(Number.MAX_SAFE_INTEGER), undefined, saved.rubies ?? []);
-      this.currentIndex = this.clampIndex(saved.position);
+      this.currentIndex = this.resumeIndex(saved);
       this.currentBook.position = this.currentIndex;
       this.showReader();
       this.rebuildChunks();
@@ -1393,7 +1432,9 @@ class ReaderApp {
     if (!this.repository || !this.currentBook) return;
     this.currentBook.lastViewedAt = Date.now();
     try {
-      await this.repository.updatePosition(this.currentBook.id, this.currentIndex, this.currentBook.lastViewedAt);
+      const charPosition = this.chunks[this.currentIndex]?.charStart;
+      if (charPosition !== undefined) this.currentBook.charPosition = charPosition;
+      await this.repository.updatePosition(this.currentBook.id, this.currentIndex, this.currentBook.lastViewedAt, charPosition);
     } catch {
       this.showError("しおりを保存できませんでした。このタブを閉じる前に読書位置を控えてください。");
     }

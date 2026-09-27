@@ -27,7 +27,7 @@ export async function sha256Text(text: string): Promise<string> {
 export interface BookRepository {
   get(id: string): Promise<BookRecord | undefined>;
   save(book: BookRecord): Promise<void>;
-  updatePosition(id: string, position: number, lastViewedAt: number): Promise<void>;
+  updatePosition(id: string, position: number, lastViewedAt: number, charPosition?: number): Promise<void>;
   listRecent(): Promise<BookRecord[]>;
   close(): void;
 }
@@ -63,12 +63,12 @@ export async function createBookRepository(
       transaction.objectStore(BOOK_STORE).put(book);
       await transactionResult(transaction);
     },
-    async updatePosition(id, position, lastViewedAt) {
+    async updatePosition(id, position, lastViewedAt, charPosition) {
       const transaction = database.transaction(BOOK_STORE, "readwrite");
       const request = transaction.objectStore(BOOK_STORE).get(id);
       request.onsuccess = () => {
         const book = ensureRubyList(request.result as BookRecord | undefined);
-        if (book) transaction.objectStore(BOOK_STORE).put({ ...book, position, lastViewedAt });
+        if (book) transaction.objectStore(BOOK_STORE).put({ ...book, position, lastViewedAt, ...(charPosition === undefined ? {} : { charPosition }) });
       };
       await transactionResult(transaction);
     },

@@ -1184,7 +1184,7 @@ class ReaderApp {
 
   /**
    * 「体重を／体重を」のように前と同じ文字が続くと、切り替わったことが見えない。
-   * そのときだけ一瞬空白をはさむ。空白は区切りの表示時間の内側に取るので、速さは変わらない。
+   * そのときだけ文字を一瞬薄くする。文字は消さない（iPhone で空白のまま戻らなかったため）。
    */
   private flashIfRepeated(element: HTMLDivElement, chunk: Chunk | undefined): void {
     const moved = this.lastRenderedIndex !== this.currentIndex;
@@ -1193,7 +1193,7 @@ class ReaderApp {
     this.lastRenderedText = chunk?.text;
     element.classList.remove("is-blank");
     if (!repeated) return;
-    // アニメーションで一瞬だけ隠す。タイマーを使わないので、iPhone でタイマーが遅れても隠れたままにならない。
+    // 同じクラスを付け直してもアニメーションが再生されるよう、一度外してから付ける。
     void element.offsetWidth;
     element.classList.add("is-blank");
   }

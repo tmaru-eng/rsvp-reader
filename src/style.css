@@ -618,16 +618,17 @@ label:focus-within {
 }
 
 .current-chunk.is-blank {
-  animation: repeat-blank 80ms steps(1, end);
+  /* 同じ文字が続いたことを、文字を消さずに一瞬薄くして知らせる。アニメーションが動かなくても文字は見えたまま。 */
+  animation: repeat-pulse 150ms ease-out;
 }
 
-@keyframes repeat-blank {
+@keyframes repeat-pulse {
   from {
-    visibility: hidden;
+    opacity: 0.25;
   }
 
   to {
-    visibility: visible;
+    opacity: 1;
   }
 }
 

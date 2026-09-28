@@ -210,6 +210,12 @@ label:focus-within {
   font-size: 14px;
 }
 
+.step-button {
+  min-width: 44px;
+  font-size: 22px;
+  line-height: 1;
+}
+
 .icon-button:disabled,
 .primary-button:disabled,
 .secondary-button:disabled {
@@ -609,6 +615,10 @@ label:focus-within {
   line-height: 2.2;
   text-align: center;
   white-space: nowrap;
+}
+
+.current-chunk.is-blank {
+  visibility: hidden;
 }
 
 .current-chunk ruby {

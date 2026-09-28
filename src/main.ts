@@ -27,6 +27,8 @@ import type { BookRecord, Chunk, ParsedBook } from "./lib/types";
 
 // 厚生労働省「情報機器作業における労働衛生管理のためのガイドライン」（連続作業は1時間以内）に合わせた休憩の案内。
 const BREAK_AFTER_MS = 50 * 60 * 1000;
+// 同じ文字の区切りが続くときに、切り替わりを見せるための空白の長さ。
+const SAME_TEXT_BLANK_MS = 80;
 const BREAK_RESET_AFTER_PAUSE_MS = 5 * 60 * 1000;
 
 const root = document.querySelector<HTMLElement>("#app");
@@ -39,6 +41,9 @@ class ReaderApp {
   private chunks: Chunk[] = [];
   private currentIndex = 0;
   private isPlaying = false;
+  private lastRenderedIndex: number | undefined;
+  private lastRenderedText: string | undefined;
+  private blankTimerId: number | undefined;
   private playedMs = 0;
   private playStartedAt: number | undefined;
   private lastPausedAt: number | undefined;
@@ -188,7 +193,10 @@ class ReaderApp {
               <div class="control-row">
                 <div class="control-group reader-main-controls">
                   <button class="icon-button" id="go-to-start" type="button" aria-label="先頭へ">|◀</button>
+                  <button class="icon-button" id="sentence-back" type="button" aria-label="今の文の頭へ戻る（文の頭なら前の文へ）">↶文頭</button>
+                  <button class="icon-button step-button" id="step-back" type="button" aria-label="1つ戻る">‹</button>
                   <button class="primary-button" id="play-toggle" type="button" disabled>▶ 再生</button>
+                  <button class="icon-button step-button" id="step-forward" type="button" aria-label="1つ進む">›</button>
                 </div>
 
                 <label class="control-group" for="speed-slider">
@@ -377,6 +385,9 @@ class ReaderApp {
     });
     this.element<HTMLButtonElement>("#change-book").addEventListener("click", () => this.showLibrary());
     this.element<HTMLButtonElement>("#go-to-start").addEventListener("click", () => this.goToStart());
+    this.element<HTMLButtonElement>("#sentence-back").addEventListener("click", () => this.moveToSentenceStart());
+    this.element<HTMLButtonElement>("#step-back").addEventListener("click", () => this.moveBy(-1));
+    this.element<HTMLButtonElement>("#step-forward").addEventListener("click", () => this.moveBy(1));
     this.element<HTMLButtonElement>("#play-toggle").addEventListener("click", () => this.togglePlayback());
     this.element<HTMLDivElement>("#reading-stage").addEventListener("pointerdown", (event) => {
       this.pointerStart = { x: event.clientX, y: event.clientY };
@@ -1122,6 +1133,7 @@ class ReaderApp {
     chunkElement.style.fontSize = "";
     this.renderChunk(chunkElement, chunk);
     this.fitChunkToStage(chunkElement);
+    this.flashIfRepeated(chunkElement, chunk);
     const total = this.currentBook?.totalChars ?? 0;
     const charsRead = chunk ? Math.min(total, chunk.charStart + Array.from(chunk.text).length) : 0;
     this.element<HTMLProgressElement>("#progress").value = total ? charsRead / total : 0;
@@ -1139,6 +1151,9 @@ class ReaderApp {
     const seconds = Math.ceil(remaining / 1000);
     this.element<HTMLElement>("#remaining-time").textContent = `残り 約${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
     this.element<HTMLButtonElement>("#go-to-start").disabled = !this.currentBook || this.currentIndex === 0;
+    this.element<HTMLButtonElement>("#sentence-back").disabled = !this.currentBook || this.currentIndex === 0;
+    this.element<HTMLButtonElement>("#step-back").disabled = !this.currentBook || this.currentIndex === 0;
+    this.element<HTMLButtonElement>("#step-forward").disabled = !this.currentBook || this.currentIndex >= this.chunks.length - 1;
     this.element<HTMLButtonElement>("#play-toggle").disabled = !this.currentBook || this.chunks.length === 0;
   }
 
@@ -1175,6 +1190,41 @@ class ReaderApp {
       fontSize = Math.max(minimumSize, fontSize - 1);
       chunkElement.style.fontSize = `${fontSize}px`;
     }
+  }
+
+  /**
+   * 「体重を／体重を」のように前と同じ文字が続くと、切り替わったことが見えない。
+   * そのときだけ一瞬空白をはさむ。空白は区切りの表示時間の内側に取るので、速さは変わらない。
+   */
+  private flashIfRepeated(element: HTMLDivElement, chunk: Chunk | undefined): void {
+    const moved = this.lastRenderedIndex !== this.currentIndex;
+    const repeated = moved && chunk !== undefined && this.lastRenderedText === chunk.text;
+    this.lastRenderedIndex = this.currentIndex;
+    this.lastRenderedText = chunk?.text;
+    if (this.blankTimerId !== undefined) window.clearTimeout(this.blankTimerId);
+    this.blankTimerId = undefined;
+    element.classList.toggle("is-blank", repeated);
+    if (!repeated) return;
+    this.blankTimerId = window.setTimeout(() => {
+      this.blankTimerId = undefined;
+      element.classList.remove("is-blank");
+    }, SAME_TEXT_BLANK_MS);
+  }
+
+  /** 今の文の頭へ戻る。すでに文の頭にいるときは、前の文の頭へ戻る。 */
+  private moveToSentenceStart(): void {
+    if (!this.currentBook || this.currentIndex === 0) return;
+    const isSentenceStart = (index: number): boolean => {
+      if (index <= 0) return true;
+      const previous = this.chunks[index - 1];
+      const current = this.chunks[index];
+      if (!previous || !current) return true;
+      return previous.paragraphIndex !== current.paragraphIndex || /[。！？!?」』]$/u.test(previous.text);
+    };
+    let index = this.currentIndex;
+    if (isSentenceStart(index)) index -= 1;
+    while (index > 0 && !isSentenceStart(index)) index -= 1;
+    this.moveBy(Math.max(0, index) - this.currentIndex);
   }
 
   private renderChunk(element: HTMLDivElement, chunk: Chunk | undefined): void {

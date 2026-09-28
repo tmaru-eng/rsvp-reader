@@ -20,6 +20,11 @@
   box-sizing: border-box;
 }
 
+html {
+  /* ダブルタップでの拡大を止める（2 本指での拡大は残す）。 */
+  touch-action: manipulation;
+}
+
 body {
   min-width: 320px;
   min-height: 100vh;
@@ -583,7 +588,7 @@ label:focus-within {
   cursor: pointer;
   user-select: none;
   -webkit-user-select: none;
-  touch-action: pan-y;
+  touch-action: pan-y pinch-zoom;
 }
 
 .reading-stage.guides-on::before,

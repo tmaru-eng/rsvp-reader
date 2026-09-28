@@ -27,6 +27,8 @@ import type { BookRecord, Chunk, ParsedBook } from "./lib/types";
 
 // 厚生労働省「情報機器作業における労働衛生管理のためのガイドライン」（連続作業は1時間以内）に合わせた休憩の案内。
 const BREAK_AFTER_MS = 50 * 60 * 1000;
+// 1 回に出す字数の上限。画面が広くてもこれ以上は増やさない（docs/research-defaults.md：10 字前後が目安）。
+const MAX_CHUNK_CHARS = 10;
 const BREAK_RESET_AFTER_PAUSE_MS = 5 * 60 * 1000;
 
 const root = document.querySelector<HTMLElement>("#app");
@@ -1152,7 +1154,7 @@ class ReaderApp {
     const style = window.getComputedStyle(stage);
     const padding = Number.parseFloat(style.paddingLeft) + Number.parseFloat(style.paddingRight);
     const innerWidth = Math.max(0, stage.clientWidth - padding);
-    return Math.max(1, Math.floor(innerWidth / (this.settings.fontSize * 0.8)));
+    return Math.max(1, Math.min(MAX_CHUNK_CHARS, Math.floor(innerWidth / (this.settings.fontSize * 0.8))));
   }
 
   private scheduleLayoutUpdate(): void {

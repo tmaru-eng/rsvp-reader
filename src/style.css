@@ -60,7 +60,8 @@ label:focus-within {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 7px 16px;
+  /* iPhone の時計・電池の表示と書名が重ならないよう、画面上端の安全領域の分だけ下げる。 */
+  padding: max(7px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) 7px max(16px, env(safe-area-inset-left));
   border-bottom: 1px solid var(--line);
   background: rgb(255 254 250 / 45%);
   font-size: 12px;

@@ -618,7 +618,17 @@ label:focus-within {
 }
 
 .current-chunk.is-blank {
-  visibility: hidden;
+  animation: repeat-blank 80ms steps(1, end);
+}
+
+@keyframes repeat-blank {
+  from {
+    visibility: hidden;
+  }
+
+  to {
+    visibility: visible;
+  }
 }
 
 .current-chunk ruby {

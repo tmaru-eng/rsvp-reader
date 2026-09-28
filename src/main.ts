@@ -21,14 +21,12 @@ import { isEpubFilename, parseEpub } from "./lib/epub";
 import { DEFAULT_SETTINGS, loadSettings, saveSettings, type ReaderSettings } from "./lib/settings";
 import { createBookRepository, sha256Text, type BookRepository } from "./lib/storage";
 import { parseTextDocument } from "./lib/text";
-import { calculateChunkDuration, calculateRemainingTime, calculateTimingCoefficient } from "./lib/timing";
+import { calculateChunkDuration, calculateTimingCoefficient } from "./lib/timing";
 import type { TimingOptions } from "./lib/timing";
 import type { BookRecord, Chunk, ParsedBook } from "./lib/types";
 
 // 厚生労働省「情報機器作業における労働衛生管理のためのガイドライン」（連続作業は1時間以内）に合わせた休憩の案内。
 const BREAK_AFTER_MS = 50 * 60 * 1000;
-// 同じ文字の区切りが続くときに、切り替わりを見せるための空白の長さ。
-const SAME_TEXT_BLANK_MS = 80;
 const BREAK_RESET_AFTER_PAUSE_MS = 5 * 60 * 1000;
 
 const root = document.querySelector<HTMLElement>("#app");
@@ -43,7 +41,6 @@ class ReaderApp {
   private isPlaying = false;
   private lastRenderedIndex: number | undefined;
   private lastRenderedText: string | undefined;
-  private blankTimerId: number | undefined;
   private playedMs = 0;
   private playStartedAt: number | undefined;
   private lastPausedAt: number | undefined;
@@ -54,6 +51,8 @@ class ReaderApp {
   private pointerStart: { x: number; y: number } | undefined;
   private activeMaxChars = 1;
   private timingCoefficient = 1;
+  private remainingSuffix: Float64Array | undefined;
+  private lastPersistedAt = 0;
   private resizeObserver: ResizeObserver | undefined;
   private layoutFrame: number | undefined;
   private aozoraIndex: AozoraIndexBook[] | null | undefined;
@@ -1138,16 +1137,7 @@ class ReaderApp {
     const charsRead = chunk ? Math.min(total, chunk.charStart + Array.from(chunk.text).length) : 0;
     this.element<HTMLProgressElement>("#progress").value = total ? charsRead / total : 0;
     this.element<HTMLElement>("#progress-count").textContent = `${charsRead.toLocaleString("ja-JP")} / ${total.toLocaleString("ja-JP")}字`;
-    const remaining = calculateRemainingTime(this.chunks, this.currentIndex, this.settings.speed, {
-      punctuationPause: this.settings.punctuationPause,
-      maxChars: this.activeMaxChars,
-      proportionality: this.settings.proportionality,
-      commaPause: this.settings.commaPause,
-      sentencePause: this.settings.sentencePause,
-      paragraphPause: this.settings.paragraphPause,
-      minDuration: this.settings.minDuration,
-      coefficient: this.timingCoefficient,
-    });
+    const remaining = this.remainingDuration(this.currentIndex);
     const seconds = Math.ceil(remaining / 1000);
     this.element<HTMLElement>("#remaining-time").textContent = `残り 約${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
     this.element<HTMLButtonElement>("#go-to-start").disabled = !this.currentBook || this.currentIndex === 0;
@@ -1201,14 +1191,11 @@ class ReaderApp {
     const repeated = moved && chunk !== undefined && this.lastRenderedText === chunk.text;
     this.lastRenderedIndex = this.currentIndex;
     this.lastRenderedText = chunk?.text;
-    if (this.blankTimerId !== undefined) window.clearTimeout(this.blankTimerId);
-    this.blankTimerId = undefined;
-    element.classList.toggle("is-blank", repeated);
+    element.classList.remove("is-blank");
     if (!repeated) return;
-    this.blankTimerId = window.setTimeout(() => {
-      this.blankTimerId = undefined;
-      element.classList.remove("is-blank");
-    }, SAME_TEXT_BLANK_MS);
+    // アニメーションで一瞬だけ隠す。タイマーを使わないので、iPhone でタイマーが遅れても隠れたままにならない。
+    void element.offsetWidth;
+    element.classList.add("is-blank");
   }
 
   /** 今の文の頭へ戻る。すでに文の頭にいるときは、前の文の頭へ戻る。 */
@@ -1272,7 +1259,23 @@ class ReaderApp {
     };
   }
 
+  /**
+   * 残り時間。42 万字の本では区切りが 9 万を超え、毎回最後まで足すと iPhone で重いので、
+   * 後ろからの累積和を 1 回だけ作って使い回す。区切りか設定が変わったら作り直す。
+   */
+  private remainingDuration(index: number): number {
+    if (!this.remainingSuffix || this.remainingSuffix.length !== this.chunks.length + 1) {
+      const suffix = new Float64Array(this.chunks.length + 1);
+      for (let position = this.chunks.length - 1; position >= 0; position -= 1) {
+        suffix[position] = (suffix[position + 1] ?? 0) + this.chunkDuration(position);
+      }
+      this.remainingSuffix = suffix;
+    }
+    return this.remainingSuffix[Math.max(0, Math.min(index, this.chunks.length))] ?? 0;
+  }
+
   private recalculateTimingCoefficient(): void {
+    this.remainingSuffix = undefined;
     this.timingCoefficient = calculateTimingCoefficient(
       this.chunks,
       this.settings.speed,
@@ -1359,6 +1362,7 @@ class ReaderApp {
     this.timerId = undefined;
     this.nextDeadline = undefined;
     void this.releaseWakeLock();
+    void this.persistPosition();
     if (this.appRoot.querySelector("#play-toggle")) this.updateReadingView();
   }
 
@@ -1420,7 +1424,8 @@ class ReaderApp {
     if (this.currentBook) this.currentBook.position = this.currentIndex;
     this.nextDeadline += this.chunkDuration(this.currentIndex);
     this.updateReadingView();
-    void this.persistPosition();
+    // 再生中は 2 秒に 1 回だけ保存する（止めたときは pausePlayback で必ず保存する）。
+    if (performance.now() - this.lastPersistedAt >= 2000) void this.persistPosition();
     this.scheduleAdvance();
   }
 
@@ -1480,6 +1485,7 @@ class ReaderApp {
 
   private async persistPosition(): Promise<void> {
     if (!this.repository || !this.currentBook) return;
+    this.lastPersistedAt = performance.now();
     this.currentBook.lastViewedAt = Date.now();
     try {
       const charPosition = this.chunks[this.currentIndex]?.charStart;

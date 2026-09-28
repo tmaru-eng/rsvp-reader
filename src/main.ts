@@ -246,7 +246,7 @@ class ReaderApp {
               <section class="timing-details is-hidden" id="timing-details" aria-label="再生リズムの詳細設定">
                 <div class="timing-details-header">
                   <strong>再生リズム</strong>
-                  <button class="secondary-button" id="timing-details-reset" type="button">既定に戻す</button>
+                  <button class="secondary-button" id="timing-details-reset" type="button">すべて既定に戻す</button>
                 </div>
                 <label class="timing-detail" for="proportionality-slider">
                   <span>字数比例</span>
@@ -478,12 +478,10 @@ class ReaderApp {
       this.scheduleLayoutUpdate();
     });
     this.element<HTMLButtonElement>("#timing-details-reset").addEventListener("click", () => {
-      this.settings.proportionality = DEFAULT_SETTINGS.proportionality;
-      this.settings.commaPause = DEFAULT_SETTINGS.commaPause;
-      this.settings.sentencePause = DEFAULT_SETTINGS.sentencePause;
-      this.settings.paragraphPause = DEFAULT_SETTINGS.paragraphPause;
-      this.settings.minDuration = DEFAULT_SETTINGS.minDuration;
-      this.settingsChanged(true);
+      // 速度・最小字数・まとめる数・文字サイズなども含め、読書の設定をすべて既定値に戻す。
+      const defaultFontSize = window.innerWidth < 600 ? 40 : DEFAULT_SETTINGS.fontSize;
+      Object.assign(this.settings, DEFAULT_SETTINGS, { fontSize: defaultFontSize });
+      this.settingsChanged(true, true);
     });
     this.element<HTMLInputElement>("#proportionality-slider").addEventListener("input", (event) => {
       this.settings.proportionality = Number((event.currentTarget as HTMLInputElement).value);
@@ -1300,6 +1298,8 @@ class ReaderApp {
 
   private moveBy(delta: number): void {
     if (!this.currentBook) return;
+    // 手で動かしたら一時停止する（戻っても勝手に進んでしまうため）。
+    if (this.isPlaying) this.pausePlayback();
     const next = this.clampIndex(this.currentIndex + delta);
     if (next === this.currentIndex) return;
     this.currentIndex = next;
@@ -1312,6 +1312,7 @@ class ReaderApp {
   private moveParagraph(direction: -1 | 1): void {
     const current = this.chunks[this.currentIndex];
     if (!current) return;
+    if (this.isPlaying) this.pausePlayback();
     if (direction < 0) {
       for (let index = this.currentIndex - 1; index >= 0; index -= 1) {
         if (this.chunks[index]?.paragraphIndex !== current.paragraphIndex) {

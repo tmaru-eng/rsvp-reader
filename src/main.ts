@@ -53,6 +53,7 @@ class ReaderApp {
   private pointerStart: { x: number; y: number } | undefined;
   private activeMaxChars = 1;
   private timingCoefficient = 1;
+  private fontRebuildTimerId: number | undefined;
   private remainingSuffix: Float64Array | undefined;
   private lastPersistedAt = 0;
   private resizeObserver: ResizeObserver | undefined;
@@ -446,8 +447,16 @@ class ReaderApp {
       this.rebuildChunks();
     });
     this.element<HTMLInputElement>("#font-size").addEventListener("input", (event) => {
+      // 動かしている間は見た目だけ変え、区切りの作り直しは指を止めてから 1 回だけ行う。
       this.settings.fontSize = Number((event.currentTarget as HTMLInputElement).value);
-      this.settingsChanged(false, true);
+      saveSettings(this.settings);
+      this.syncSettingsControls();
+      this.updateReadingView();
+      if (this.fontRebuildTimerId !== undefined) window.clearTimeout(this.fontRebuildTimerId);
+      this.fontRebuildTimerId = window.setTimeout(() => {
+        this.fontRebuildTimerId = undefined;
+        if (this.calculateMaxChars() !== this.activeMaxChars) this.rebuildChunks();
+      }, 300);
     });
     this.element<HTMLInputElement>("#punctuation-pause").addEventListener("change", (event) => {
       this.settings.punctuationPause = (event.currentTarget as HTMLInputElement).checked;

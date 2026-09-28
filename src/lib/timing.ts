@@ -49,10 +49,6 @@ function isParagraphEnd<T extends TimedChunk>(chunks: readonly T[], index: numbe
   return Boolean(chunk && (index === chunks.length - 1 || chunks[index + 1]?.paragraphIndex !== chunk.paragraphIndex));
 }
 
-function scaledDurationSum<T extends TimedChunk>(durations: readonly number[], coefficient: number, minimum: number): number {
-  return durations.reduce((sum, duration) => sum + Math.max(minimum, duration * coefficient), 0);
-}
-
 /** Find one book-wide scale that preserves pause ratios while targeting the requested reading speed. */
 export function calculateTimingCoefficient<T extends TimedChunk>(
   chunks: readonly T[],
@@ -70,17 +66,20 @@ export function calculateTimingCoefficient<T extends TimedChunk>(
     ...options,
     paragraphEnd: isParagraphEnd(chunks, index),
   }));
-  let lower = 0;
-  let upper = targetDuration / durations.reduce((sum, duration) => sum + duration, 0);
-  if (!Number.isFinite(upper) || upper <= 0) return 1;
-  while (scaledDurationSum(durations, upper, minimum) < targetDuration) upper *= 2;
-
-  for (let iteration = 0; iteration < 60; iteration += 1) {
-    const middle = (lower + upper) / 2;
-    if (scaledDurationSum(durations, middle, minimum) < targetDuration) lower = middle;
-    else upper = middle;
+  // Σ max(minimum, d × c) = target を正確に解く。長い区切りから順に「最短時間より長く伸びる側」に入れていき、
+  // 条件を満たす最初の c を返す。二分探索で 7 万区切りを何十回も足し直していたのをやめた（長い本で重かった）。
+  const sorted = [...durations].sort((left, right) => right - left);
+  let linearSum = 0;
+  for (let count = 1; count <= sorted.length; count += 1) {
+    linearSum += sorted[count - 1] ?? 0;
+    if (linearSum <= 0) continue;
+    const coefficient = (targetDuration - minimum * (sorted.length - count)) / linearSum;
+    const smallestLinear = sorted[count - 1] ?? 0;
+    const nextDuration = sorted[count] ?? 0;
+    if (smallestLinear * coefficient >= minimum && (count === sorted.length || nextDuration * coefficient < minimum)) return coefficient;
   }
-  return (lower + upper) / 2;
+  const total = durations.reduce((sum, duration) => sum + duration, 0);
+  return total > 0 ? targetDuration / total : 1;
 }
 
 export function calculateRemainingTime<T extends TimedChunk>(

@@ -91,12 +91,15 @@ function makeSegmentParts(paragraph: string, inputSegments: string[], rubyRanges
   const characterCount = countSourceChars(paragraph);
   const boundaries = new Set<number>([0, characterCount]);
   let cursorUtf16 = 0;
+  // 段落の先頭から数え直すと長い段落で重くなるので、前回の位置からの差分だけ数える。
+  let cursorChars = 0;
 
   for (const segment of segments) {
     const relativeStart = paragraph.indexOf(segment, cursorUtf16);
     const startUtf16 = relativeStart >= 0 ? relativeStart : cursorUtf16;
-    const start = countSourceChars(paragraph.slice(0, startUtf16));
+    const start = cursorChars + countSourceChars(paragraph.slice(cursorUtf16, startUtf16));
     const end = start + countSourceChars(segment);
+    cursorChars = end;
     boundaries.add(start);
     boundaries.add(end);
     cursorUtf16 = startUtf16 + segment.length;
@@ -265,16 +268,33 @@ function enforceMinimumLength(chunks: Chunk[], minChars: number, maxChars: numbe
 const HEADING_MAX_CHARS = 8;
 const headingBreakers = /[、。，．！？!?「」『』（）()…‥]/u;
 
+// BudouX の分割結果は表示の設定に左右されないので、段落ごとに覚えておく。
+// 文字サイズを変えるたびに長い本（42 万字）を分割し直すと、1 回に 1 秒以上かかっていた。
+const segmentCache = new Map<string, string[]>();
+const SEGMENT_CACHE_LIMIT = 200_000;
+
+function cachedJapaneseSegments(paragraph: string): string[] {
+  const cached = segmentCache.get(paragraph);
+  if (cached) return cached;
+  const segments = japaneseParser.parse(paragraph);
+  if (segmentCache.size >= SEGMENT_CACHE_LIMIT) segmentCache.clear();
+  segmentCache.set(paragraph, segments);
+  return segments;
+}
+
 export function buildChunks(
   text: string,
   options: ChunkOptions,
-  segmenter: Segmenter = (paragraph) => japaneseParser.parse(paragraph),
+  segmenter: Segmenter = cachedJapaneseSegments,
   rubies: readonly Ruby[] = [],
 ): Chunk[] {
   const chunks: Chunk[] = [];
   const maxChars = Math.max(1, options.maxChars);
   let charOffset = 0;
   const paragraphs = text.split("\n");
+  // 段落は先頭から順に進むので、開始位置順に並べたルビを 1 回なめるだけで振り分けられる。
+  const sortedRubies = [...rubies].sort((left, right) => left.start - right.start);
+  let rubyCursor = 0;
 
   paragraphs.forEach((paragraph, paragraphIndex) => {
     const leading = paragraph.match(/^\s*/u)?.[0] ?? "";
@@ -285,9 +305,14 @@ export function buildChunks(
       const headingLike = displayWidth(content) <= Math.min(maxChars, HEADING_MAX_CHARS) && !headingBreakers.test(content);
       const segments = headingLike ? [content] : segmenter(content).filter(Boolean);
       const contentLength = countSourceChars(content);
-      const paragraphRubies = rubies
-        .filter((ruby) => ruby.start >= normalizedOffset && ruby.end <= normalizedOffset + contentLength)
-        .map((ruby) => ({ ...ruby, start: ruby.start - normalizedOffset, end: ruby.end - normalizedOffset }));
+      const paragraphEnd = normalizedOffset + contentLength;
+      while (rubyCursor < sortedRubies.length && (sortedRubies[rubyCursor]?.start ?? 0) < normalizedOffset) rubyCursor += 1;
+      const paragraphRubies: Ruby[] = [];
+      for (let index = rubyCursor; index < sortedRubies.length; index += 1) {
+        const ruby = sortedRubies[index];
+        if (!ruby || ruby.start >= paragraphEnd) break;
+        if (ruby.end <= paragraphEnd) paragraphRubies.push({ ...ruby, start: ruby.start - normalizedOffset, end: ruby.end - normalizedOffset });
+      }
       const grouped = groupSegments(content, paragraphIndex, normalizedOffset, segments, options.groupSize, maxChars, paragraphRubies);
       chunks.push(...enforceMinimumLength(grouped, options.minChars, maxChars));
     }
